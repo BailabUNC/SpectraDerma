@@ -13,14 +13,14 @@
 #define SCL                 18
 #define SDA                 19
 
-#define LED_ON_US           50
 #define ALARM_MS            (uint64_t) 5
-#define BUFFER_SIZE         10
+#define BUFFER_SIZE         1
 #define CHANNEL_COUNT       10
 #define CHAR_SIZE           (CHANNEL_COUNT * BUFFER_SIZE * 6 + 1)
 
 hw_timer_t                  *timer = NULL;
 SemaphoreHandle_t           sensorSemaphore;
+SemaphoreHandle_t           bleSemaphore;
 
 int channel_buffers[CHANNEL_COUNT][BUFFER_SIZE];
 int buffer_index = 0;
@@ -36,10 +36,15 @@ Adafruit_AS7341 as7341;
 
 void IRAM_ATTR onTimer()
 {
-    xSemaphoreGiveFromISR(sensorSemaphore, NULL);
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    xSemaphoreGiveFromISR(sensorSemaphore, &xHigherPriorityTaskWoken);
+    if (xHigherPriorityTaskWoken == pdTRUE)
+    {
+        portYIELD_FROM_ISR();
+    }
 }
 
-void sensorTask(void *pvParameters)
+void sdSensorTask(void *pvParameters)
 {
     while (1)
     {
@@ -66,19 +71,30 @@ void sensorTask(void *pvParameters)
 
             if (buffer_index >= BUFFER_SIZE)
             {
-                for (int i = 0; i < BUFFER_SIZE; i++)
-                {
-                    char data[CHAR_SIZE];
-                    char *pData = data;
-                    for (int j = 0; j < CHANNEL_COUNT; j++)
-                    {
-                        pData += sprintf(pData, "%d,", channel_buffers[j][i]);
-                    }
-                    *(pData - 1) = '\0'; // Remove the last comma and add a null terminator
-
-                    sdCharacteristic.writeValue(data);  // Send each line individually via BLE
-                }
+                xSemaphoreGive(bleSemaphore);
                 buffer_index = 0;
+            }
+        }
+    }
+}
+
+void sdBleTask(void *pvParameters)
+{
+    while (1)
+    {
+        if (xSemaphoreTake(bleSemaphore, portMAX_DELAY) == pdTRUE)
+        {
+            for (int i = 0; i < BUFFER_SIZE; i++)
+            {
+                char data[CHAR_SIZE];
+                char *pData = data;
+                for (int j = 0; j < CHANNEL_COUNT; j++)
+                {
+                    pData += sprintf(pData, "%d,", channel_buffers[j][i]);
+                }
+                *pData = '\0'; // Remove the last comma and add a null terminator
+
+                sdCharacteristic.writeValue(data);  // Send each line individually via BLE
             }
         }
     }
@@ -90,7 +106,7 @@ void setup()
     digitalWrite(LED_CTRL, HIGH);
 
     ledcAttach(LED_PWM, 20000, 14);
-    ledcWrite(LED_PWM, 1);
+    ledcWrite(LED_PWM, 10000);
 
     Serial.begin(115200);
     Wire.setPins(SDA, SCL);
@@ -102,8 +118,6 @@ void setup()
     timer = timerBegin(1000000);
     timerAttachInterrupt(timer, &onTimer);
     timerAlarm(timer, ALARM_MS * 1000, true, 0);
-    
-    sensorSemaphore = xSemaphoreCreateBinary();
 
     // Setup AS7341
     if (!as7341.begin())
@@ -115,10 +129,11 @@ void setup()
 
     as7341.setATIME(29);
     as7341.setASTEP(59);
-    as7341.setGain(AS7341_GAIN_128X);
+    as7341.setGain(AS7341_GAIN_512X);
 
     // Setup sensor task
-    xTaskCreate(sensorTask, "Sensor task", 4096, NULL, 1, NULL);
+    sensorSemaphore = xSemaphoreCreateBinary();
+    xTaskCreate(sdSensorTask, "Sensor task", 4096, NULL, 2, NULL);
 
     // Initialize BLE
     if (!BLE.begin())
@@ -128,11 +143,16 @@ void setup()
     }
 
     BLE.setLocalName("SpectraDerma");
+    BLE.setDeviceName("SpectraDerma");
     BLE.setAdvertisedService(sdService);
     sdService.addCharacteristic(sdCharacteristic);
     BLE.addService(sdService);
 
     sdCharacteristic.writeValue("Waiting for data.");
+
+    // Setup BLE task
+    bleSemaphore = xSemaphoreCreateBinary();
+    xTaskCreate(sdBleTask, "BLE Task", 8192, NULL, 1, NULL);
 
     BLE.advertise();
     ESP_LOGI(ESP_TAG, "BLE Initialized.");
@@ -146,7 +166,7 @@ void loop()
         ESP_LOGI(ESP_TAG, "Connected to central: %s", central.address().c_str());
         while (central.connected())
         {
-            vTaskDelay(pdMS_TO_TICKS(10));  // Non-blocking delay
+            vTaskDelay(pdMS_TO_TICKS(1000));  // Non-blocking delay
         }
         ESP_LOGI(ESP_TAG, "Disconnected from central: %s", central.address().c_str());
     }
