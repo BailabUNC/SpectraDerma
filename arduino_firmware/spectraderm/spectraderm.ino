@@ -44,7 +44,7 @@ void setup()
     pinMode(LED_CTRL, OUTPUT);
     digitalWrite(LED_CTRL, HIGH);
 
-    ledcAttach(LED_PWM, 20000, 14);
+    ledcAttach(LED_PWM, 20000, 10);
     ledcWrite(LED_PWM, 1);
 
     Serial.begin(115200);
@@ -68,6 +68,12 @@ void setup()
     as7341.setATIME(29);
     as7341.setASTEP(59);
     as7341.setGain(AS7341_GAIN_128X);
+
+    Adafruit_I2CDevice i2c_dev = Adafruit_I2CDevice(AS7341_I2CADDR_DEFAULT, &Wire);
+    Adafruit_BusIO_Register enable_reg = Adafruit_BusIO_Register(&i2c_dev, (uint16_t) AS7341_ENABLE);
+    uint8_t enable_reg_value;
+    enable_reg.read(&enable_reg_value);
+    ESP_LOGI(ESP_TAG, "AS7341_ENABLE register value: 0x%02X", enable_reg_value);
 
     // Initialize BLE
     if (!BLE.begin())
