@@ -37,18 +37,11 @@ esp_err_t sdm_as7341_init(sdm_as7341_t *dev, i2c_port_t port, uint8_t addr)
     }
     ESP_LOGI(TAG, "AS7341 found: WHOAMI: 0x%02X", whoami);
 
-    uint8_t enable_reg;
-    uint8_t cfg6_reg;
-    ret = sdm_as7341_read_reg(dev, AS7341_ENABLE, &enable_reg);
-    ret = sdm_as7341_read_reg(dev, AS7341_CFG6, &cfg6_reg);
-    ESP_LOGI("REG_CHECK", "init: AS7341_ENABLE register initial value: 0x%02X", enable_reg);
-    ESP_LOGI("REG_CHECK", "init: AS7341_CFG6 register initial value: 0x%02X", cfg6_reg);
     sdm_as7341_enable(dev, true);
-
+    sdm_as7341_set_integration_mode(dev, AS7341_INT_MODE_SPM);
     /* Integration time = (ATIME + 1) * (ASTEP + 1) * 2.78 us
        ADC scale = (ATIME + 1) * (ASTEP + 1) 
     */
-    sdm_as7341_set_integration_mode(dev, AS7341_INT_MODE_SYNS);
     sdm_as7341_set_integration_time(dev, 19, 9);
     sdm_as7341_set_gain(dev, AS7341_GAIN_512X);
 
