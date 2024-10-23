@@ -15,22 +15,48 @@
 #include "esp_bt_main.h"
 #include "esp_gatt_common_api.h"
 #include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "driver/gptimer.h"
+#include "driver/ledc.h"
 #include "sdkconfig.h"
 
 #include "sdm_as7341.h"
 
-#define LED_CTRL_GPIO                       0
-#define LED_PWM_GPIO                        1
-#define I2C_MASTER_SCL_IO                   18
-#define I2C_MASTER_SDA_IO                   19
-#define I2C_MASTER_FREQ_HZ                  1000000  // 1 MHz
+#define GPIO_LED_CTRL                       GPIO_NUM_0
+#define GPIO_NIR_CTRL                       GPIO_NUM_4
+
+#define LEDC_MODE                           LEDC_LOW_SPEED_MODE
+#define LEDC_TIMER                          LEDC_TIMER_0
+#define LEDC_DUTY_RESOLUTION                LEDC_TIMER_8_BIT
+#define LEDC_FREQUENCY                      10000
+
+// PWM for AS clock signal
+#define LEDC_AS_OUTPUT_IO                   GPIO_NUM_10
+#define LEDC_AS_CHANNEL                     LEDC_CHANNEL_0
+#define LEDC_AS_DUTY                        127             // ((2 ** 8) - 1) * 50% = 127
+
+// PWM for LED brightness control
+#define LEDC_PWM_OUTPUT_IO                  GPIO_NUM_1
+#define LEDC_PWM_CHANNEL                    LEDC_CHANNEL_1
+#define LEDC_PWM_DUTY                       2               // ((2 ** 8) - 1) * 1% = 2
+
+// I2C config
+#define I2C_MASTER_SCL_IO                   GPIO_NUM_18
+#define I2C_MASTER_SDA_IO                   GPIO_NUM_19
+#define I2C_MASTER_FREQ_HZ                  1000000         // 1 MHz
 #define I2C_MASTER_NUM                      I2C_NUM_0
 
-#define TIMER_ALARM_US                      1000
+// Timer for measurement and BLE
+#define TIMER_ALARM_US                      10000
 #define BUFFER_SIZE                         1
-#define CHANNEL_COUNT                       10
+#define CHANNEL_COUNT                       12
 #define CHAR_SIZE                           (CHANNEL_COUNT * BUFFER_SIZE * 6 + 1)
+
+#define SDM_MEAS_ALL_CHANNELS
+
+#ifdef SDM_MEAS_ALL_CHANNELS
+static bool use_f1f4_clear_nir_mode =       true;
+#endif
 
 // UUIDs
 #define GATTS_SERVICE_UUID_TEST             0x00FF
@@ -42,7 +68,6 @@
 
 #define CHAR_DECLARATION_SIZE               (sizeof(uint8_t))
 
-// static uint8_t adv_config_done =            0;
 uint16_t gatt_service_handle =              0;
 esp_gatt_char_prop_t gatt_char_property =   0;
 esp_attr_value_t gatt_char_value = {
@@ -174,7 +199,7 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
     }
 }
 
-static bool IRAM_ATTR sdm_on_alarm(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_ctx)
+static bool IRAM_ATTR sdm_intr_callback(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_ctx)
 {
     BaseType_t higher_priority_task_woken = pdFALSE;
     xSemaphoreGiveFromISR(sensor_sphr, &higher_priority_task_woken);
@@ -185,22 +210,57 @@ static bool IRAM_ATTR sdm_on_alarm(gptimer_handle_t timer, const gptimer_alarm_e
 
 static void sdm_sensor_task(void *arg)
 {
-    uint16_t reading_buffer[12];
+    esp_err_t ret;
+    uint16_t reading_buffer[6];
 
     while (1)
     {
         if (xSemaphoreTake(sensor_sphr, portMAX_DELAY) != pdTRUE) continue;
         
-        gpio_set_level(LED_CTRL_GPIO, 1);
+        gpio_set_level(GPIO_LED_CTRL, 1);
 
-        esp_err_t ret = sdm_as7341_read_all_channels(&as7341_sensor, reading_buffer);
+        #ifdef SDM_MEAS_ALL_CHANNELS
+        // Check the current mode and perform the corresponding measurement
+        if (use_f1f4_clear_nir_mode)
+            ret = sdm_as7341_start_measure(&as7341_sensor, AS7341_CH_F1F4_CLEAR_NIR);
+        else
+            ret = sdm_as7341_start_measure(&as7341_sensor, AS7341_CH_F5F8_CLEAR_NIR);
+        #else
+        // Only measure the longer wavelengths
+        ret = sdm_as7341_start_measure(&as7341_sensor, AS7341_CH_F5F8_CLEAR_NIR);
+        #endif // SDM_MEAS_ALL_CHANNELS
+
         if (ret == ESP_OK)
         {
-            for (int i = 0; i < CHANNEL_COUNT; i++)
+            sdm_as7341_read_channel_data(&as7341_sensor, reading_buffer);
+
+            #ifdef SDM_MEAS_ALL_CHANNELS
+            if (use_f1f4_clear_nir_mode)
             {
-                notify_buffer[buffer_index][i] = reading_buffer[i];  // fill the notify_buffer with new reading
+                // Fill the first 6 channels when in F1F4 mode
+                for (int i = 0; i < 6; i++)
+                {
+                    notify_buffer[buffer_index][i] = reading_buffer[i];
+                }
             }
-            buffer_index++;
+            else
+            {
+                // Fill the last 6 channels (7th location onward) when in F5F8 mode
+                for (int i = 0; i < 6; i++)
+                {
+                    notify_buffer[buffer_index][i + 6] = reading_buffer[i];
+                }
+
+                // Only increase buffer_index after F5F8 data is filled
+                buffer_index++;
+            }
+            #else
+            for (int i = 0; i < 6; i++)
+            {
+                notify_buffer[buffer_index][i] = reading_buffer[i];
+                buffer_index++;
+            }
+            #endif // SDM_MEAS_ALL_CHANNELS
 
             // If buffer is full, signal BLE task
             if (buffer_index >= BUFFER_SIZE)
@@ -214,7 +274,11 @@ static void sdm_sensor_task(void *arg)
             ESP_LOGE(TAG, "Failed to read sensor data");
         }
 
-        gpio_set_level(LED_CTRL_GPIO, 0);
+        #ifdef SDM_MEAS_ALL_CHANNELS
+        use_f1f4_clear_nir_mode = !use_f1f4_clear_nir_mode;
+        #endif // SDM_MEAS_ALL_CHANNELS
+
+        gpio_set_level(GPIO_LED_CTRL, 0);
     }
 }
 
@@ -248,10 +312,7 @@ static void sdm_ble_task(void *arg)
                                                     strlen(data_string),
                                                     (uint8_t *) data_string,
                                                     false);
-        if (ret != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to send notification, error code: %x", ret);
-        }
+        if (ret != ESP_OK) ESP_LOGE(TAG, "Failed to send notification, error code: %x", ret);
     }
 }
 
@@ -301,14 +362,52 @@ static void sdm_gpio_init()
 {
     // Configure GPIO
     gpio_config_t io_config = {
-        .pin_bit_mask = (1ULL << LED_CTRL_GPIO),
+        .pin_bit_mask = (1ULL << GPIO_LED_CTRL | 1ULL << GPIO_NIR_CTRL),
         .mode = GPIO_MODE_OUTPUT,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&io_config);
-    gpio_set_level(LED_CTRL_GPIO, 1);
+    gpio_set_level(GPIO_LED_CTRL, 1);
+    gpio_set_level(GPIO_NIR_CTRL, 1);
+}
+
+static void sdm_ledc_init()
+{
+    // Prepare and set configuration of timer for LEDC
+    ledc_timer_config_t ledc_timer = {
+        .speed_mode = LEDC_MODE,
+        .timer_num = LEDC_TIMER,
+        .duty_resolution = LEDC_DUTY_RESOLUTION,
+        .freq_hz = LEDC_FREQUENCY,
+        .clk_cfg = LEDC_AUTO_CLK,
+    };
+    ledc_timer_config(&ledc_timer);
+
+    // Prepare and set configuration LEDC channel for AS7341 GPIO pin
+    ledc_channel_config_t ledc_as_channel = {
+        .speed_mode = LEDC_MODE,
+        .channel = LEDC_AS_CHANNEL,
+        .timer_sel = LEDC_TIMER,
+        .intr_type = LEDC_INTR_DISABLE,
+        .gpio_num = LEDC_AS_OUTPUT_IO,
+        .duty = LEDC_AS_DUTY,
+        .hpoint = 0,
+    };
+    ledc_channel_config(&ledc_as_channel);
+    
+    // Prepare and set configuration LEDC channel for LED PWM
+    ledc_channel_config_t ledc_pwm_channel = {
+        .speed_mode = LEDC_MODE,
+        .channel = LEDC_PWM_CHANNEL,
+        .timer_sel = LEDC_TIMER,
+        .intr_type = LEDC_INTR_DISABLE,
+        .gpio_num = LEDC_PWM_OUTPUT_IO,
+        .duty = LEDC_PWM_DUTY,
+        .hpoint = 0,
+    };
+    ledc_channel_config(&ledc_pwm_channel);
 }
 
 static void sdm_wire_init()
@@ -341,8 +440,6 @@ static void sdm_wire_init()
 
 static void sdm_gptimer_init()
 {
-    esp_err_t ret;
-
     // Create semaphores
     sensor_sphr = xSemaphoreCreateBinary();
     ble_sphr = xSemaphoreCreateBinary();
@@ -358,8 +455,7 @@ static void sdm_gptimer_init()
         .direction = GPTIMER_COUNT_UP,
         .resolution_hz = 1000000,  // 1 MHz
     };
-    ret = gptimer_new_timer(&timer_config, &gptimer);
-    ESP_ERROR_CHECK(ret);
+    gptimer_new_timer(&timer_config, &gptimer);
 
     // Set up alarm for the timer
     gptimer_alarm_config_t alarm_config = {
@@ -369,28 +465,24 @@ static void sdm_gptimer_init()
             .auto_reload_on_alarm = true,
         }
     };
-    ret = gptimer_set_alarm_action(gptimer, &alarm_config);
-    ESP_ERROR_CHECK(ret);
+    gptimer_set_alarm_action(gptimer, &alarm_config);
 
     // Register the timer callback
     gptimer_event_callbacks_t cbs = {
-        .on_alarm = sdm_on_alarm,
+        .on_alarm = sdm_intr_callback,
     };
-    ret = gptimer_register_event_callbacks(gptimer, &cbs, NULL);
-    ESP_ERROR_CHECK(ret);
-
-    ret = gptimer_enable(gptimer);
-    ESP_ERROR_CHECK(ret);
-    ret = gptimer_start(gptimer);
-    ESP_ERROR_CHECK(ret);
+    gptimer_register_event_callbacks(gptimer, &cbs, NULL);
+    gptimer_enable(gptimer);
+    gptimer_start(gptimer);
 }
 
 void app_main(void)
 {
     sdm_gpio_init();
+    sdm_ledc_init();
     sdm_wire_init();
-    sdm_gptimer_init();
     sdm_ble_init();
+    sdm_gptimer_init();
 
     // Main loop
     while (1)

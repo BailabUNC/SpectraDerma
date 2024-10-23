@@ -78,10 +78,18 @@
 #define AS7341_FDATA_L          0xFE        ///< AS7341_FDATA_L (unused)
 #define AS7341_FDATA_H          0xFF        ///< AS7341_FDATA_H (unused)
 
-#define AS7341_SPECTRAL_INT_HIGH_MSK                                           \
-  0b00100000 ///< bitmask to check for a high threshold interrupt
-#define AS7341_SPECTRAL_INT_LOW_MSK                                            \
-  0b00010000 ///< bitmask to check for a low threshold interrupt
+/*
+    Integration time = (ATIME + 1) * (ASTEP + 1) * 2.78 us
+    ADC scale = (ATIME + 1) * (ASTEP + 1)
+    Wait time = (WTIME + 1) * 2.78 ms
+*/
+#define SDM_AS7341_ATIME        19
+#define SDM_AS7341_ASTEP        19
+#define SDM_AS7341_WTIME        0
+#define SDM_AS7341_GAIN         AS7341_GAIN_128X
+
+#define AS7341_SPECTRAL_INT_HIGH_MSK    0b00100000  ///< bitmask to check for a high threshold interrupt
+#define AS7341_SPECTRAL_INT_LOW_MSK     0b00010000  ///< bitmask to check for a low threshold interrupt
 
 /**
  * @brief Register bank access
@@ -199,6 +207,15 @@ typedef enum {
     AS7341_CHANNEL_NIR,
 } sdm_as7341_color_channel_t;
 
+/**
+ * @brief GPIO input/output mode
+ *
+ */
+typedef enum {
+    AS7341_GPIO_INPUT,
+    AS7341_GPIO_OUTPUT,
+} sdm_as7341_gpio_mode_t;
+
 typedef struct {
     i2c_port_t i2c_port;
     uint8_t i2c_addr;
@@ -210,6 +227,7 @@ esp_err_t sdm_as7341_read_reg(sdm_as7341_t *dev, uint8_t reg, uint8_t *data_wr);
 
 esp_err_t sdm_as7341_enable(sdm_as7341_t *dev, bool enable);
 esp_err_t sdm_as7341_enable_spectral_measurement(sdm_as7341_t *dev, bool enable);
+esp_err_t sdm_as7341_enable_wait(sdm_as7341_t *dev, bool enable);
 esp_err_t sdm_as7341_enable_smux(sdm_as7341_t *dev, bool enable);
 
 esp_err_t sdm_as7341_start_measure(sdm_as7341_t *dev, sdm_channel_mapping_mode_t mode);
@@ -220,7 +238,10 @@ esp_err_t sdm_as7341_setup_f5f8_clear_nir(sdm_as7341_t *dev);
 esp_err_t sdm_as7341_set_integration_mode(sdm_as7341_t *dev, sdm_as7341_int_mode_t mode);
 esp_err_t sdm_as7341_set_integration_time(sdm_as7341_t *dev, uint8_t atime, uint16_t astep);
 esp_err_t sdm_as7341_set_gain(sdm_as7341_t *dev, sdm_as7341_gain_t gain);
+esp_err_t sdm_as7341_set_wait_time(sdm_as7341_t *dev, uint8_t wtime);
+esp_err_t sdm_as7341_set_gpio_state(sdm_as7341_t *dev, sdm_as7341_gpio_mode_t gpio_mode);
 
-esp_err_t sdm_as7341_read_all_channels(sdm_as7341_t *dev, uint16_t *data);
+esp_err_t sdm_as7341_read_channel_data(sdm_as7341_t *dev, uint16_t *data);
+// esp_err_t sdm_as7341_read_all_channels(sdm_as7341_t *dev, uint16_t *data);
 
 #endif  // AS7341_H
