@@ -52,11 +52,7 @@
 #define CHANNEL_COUNT                       12
 #define CHAR_SIZE                           (CHANNEL_COUNT * BUFFER_SIZE * 6 + 1)
 
-#define SDM_MEAS_ALL_CHANNELS
-
-#ifdef SDM_MEAS_ALL_CHANNELS
 static bool use_f1f4_clear_nir_mode =       true;
-#endif
 
 // UUIDs
 #define GATTS_SDM_SERVICE_UUID              {0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0}
@@ -104,7 +100,6 @@ static const char *TAG =                    "SDM";
 sdm_as7341_t                                as7341_sensor;
 uint16_t                                    notify_buffer[BUFFER_SIZE][CHANNEL_COUNT];
 uint16_t                                    buffer_index = 0;
-uint16_t placeholder = 114514;
 
 SemaphoreHandle_t                           sensor_sphr;
 SemaphoreHandle_t                           ble_sphr;
@@ -306,22 +301,16 @@ static void sdm_sensor_task(void *arg)
         gpio_set_level(GPIO_LED_CTRL, 1);
         gpio_set_level(GPIO_NIR_CTRL, 0);
 
-        #ifdef SDM_MEAS_ALL_CHANNELS
         // Check the current mode and perform the corresponding measurement
         if (use_f1f4_clear_nir_mode)
             ret = sdm_as7341_start_measure(&as7341_sensor, AS7341_CH_F1F4_CLEAR_NIR);
         else
             ret = sdm_as7341_start_measure(&as7341_sensor, AS7341_CH_F5F8_CLEAR_NIR);
-        #else
-        // Only measure the longer wavelengths
-        ret = sdm_as7341_start_measure(&as7341_sensor, AS7341_CH_F5F8_CLEAR_NIR);
-        #endif // SDM_MEAS_ALL_CHANNELS
 
         if (ret == ESP_OK)
         {
             sdm_as7341_read_channel_data(&as7341_sensor, reading_buffer);
 
-            #ifdef SDM_MEAS_ALL_CHANNELS
             if (use_f1f4_clear_nir_mode)
             {
                 // Fill the first 6 channels when in F1F4 mode
@@ -341,13 +330,6 @@ static void sdm_sensor_task(void *arg)
                 // Only increase buffer_index after F5F8 data is filled
                 buffer_index++;
             }
-            #else
-            for (int i = 0; i < 6; i++)
-            {
-                notify_buffer[buffer_index][i] = reading_buffer[i];
-                buffer_index++;
-            }
-            #endif // SDM_MEAS_ALL_CHANNELS
 
             // If buffer is full, signal BLE task
             if (buffer_index >= BUFFER_SIZE)
@@ -360,10 +342,8 @@ static void sdm_sensor_task(void *arg)
         {
             ESP_LOGE(TAG, "Failed to read sensor data");
         }
-
-        #ifdef SDM_MEAS_ALL_CHANNELS
+        
         use_f1f4_clear_nir_mode = !use_f1f4_clear_nir_mode;
-        #endif // SDM_MEAS_ALL_CHANNELS
 
         gpio_set_level(GPIO_LED_CTRL, 0);
         gpio_set_level(GPIO_NIR_CTRL, 1);
