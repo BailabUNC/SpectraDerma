@@ -38,7 +38,7 @@
 // PWM for LED brightness control
 #define LEDC_PWM_OUTPUT_IO                  GPIO_NUM_1
 #define LEDC_PWM_CHANNEL                    LEDC_CHANNEL_1
-#define LEDC_PWM_DUTY                       2               // ((2 ** 8) - 1) * 1% = 2
+#define LEDC_PWM_DUTY                       10               // ((2 ** 8) - 1) * 1% = 2
 
 // I2C config
 #define I2C_MASTER_SCL_IO                   GPIO_NUM_18
@@ -54,13 +54,30 @@
 
 static bool use_f1f4_clear_nir_mode =       true;
 
-// UUIDs
-#define GATTS_SDM_SERVICE_UUID              {0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0}
-#define GATTS_SDM_CHAR_UUID                 {0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef}
+// BLE
+static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
+
+#define GATTS_SDM_SERVICE_UUID              0x00FF
+#define GATTS_SDM_CHAR_UUID                 0xFF01
 #define GATTS_DESCR_UUID                    0x3333
 #define GATTS_NUM_HANDLE                    4
 
-// BLE
+#define DEVICE_NAME                         "SpectraDerma"
+#define TEST_MANUFACTURER_DATA_LEN          17
+
+static uint8_t adv_config_done =            0;
+#define adv_config_flag                     (1 << 0)
+#define scan_rsp_config_flag                (1 << 1)
+
+static uint8_t adv_service_uuid128[32] = {
+    /* LSB <--------------------------------------------------------------------------------> MSB */
+    //first uuid, 16bit, [12],[13] is the value
+    0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0xEE, 0x00, 0x00, 0x00,
+    //second uuid, 32bit, [12], [13], [14], [15] is the value
+    0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00,
+};
+
+
 static uint16_t connection_id =             0;
 static esp_gatt_if_t gatt_if =              0;
 static uint16_t gatt_char_handle =          0;
@@ -70,19 +87,22 @@ static esp_bt_uuid_t descr_uuid;
 static bool is_ready_for_notif =            false;
 static bool is_connected =                  false;
 
+// The length of adv data must be less than 31 bytes
+//static uint8_t test_manufacturer[TEST_MANUFACTURER_DATA_LEN] =  {0x12, 0x23, 0x45, 0x56};
+//adv data
 static esp_ble_adv_data_t adv_data = {
     .set_scan_rsp = false,
     .include_name = true,
-    .include_txpower = true,
-    .min_interval = 0x0006,                 // 7.5 ms
-    .max_interval = 0x0010,                 // 20 ms
+    .include_txpower = false,
+    .min_interval = 0x0006, //slave connection min interval, Time = min_interval * 1.25 msec
+    .max_interval = 0x0010, //slave connection max interval, Time = max_interval * 1.25 msec
     .appearance = 0x00,
-    .manufacturer_len = 0,
-    .p_manufacturer_data = NULL,
+    .manufacturer_len = 0, //TEST_MANUFACTURER_DATA_LEN,
+    .p_manufacturer_data =  NULL, //&test_manufacturer[0],
     .service_data_len = 0,
     .p_service_data = NULL,
-    .service_uuid_len = 0,
-    .p_service_uuid = NULL,
+    .service_uuid_len = sizeof(adv_service_uuid128),
+    .p_service_uuid = adv_service_uuid128,
     .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT),
 };
 
@@ -124,10 +144,12 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
                 .is_primary = true,
             };
 
-            uint8_t gatt_service_uuid128[] = GATTS_SDM_SERVICE_UUID;
-            memcpy(gatt_service_id.id.uuid.uuid.uuid128, gatt_service_uuid128, sizeof(gatt_service_uuid128));
+            gatt_service_id.is_primary = true;
+            gatt_service_id.id.inst_id = 0x00;
+            gatt_service_id.id.uuid.len = ESP_UUID_LEN_16;
+            gatt_service_id.id.uuid.uuid.uuid16 = GATTS_SDM_SERVICE_UUID;
 
-            esp_ble_gap_set_device_name("SpectraDerma");
+            esp_ble_gap_set_device_name(DEVICE_NAME);
             esp_ble_gap_config_adv_data(&adv_data);
 
             esp_ble_gatts_create_service(gatts_if, &gatt_service_id, 4);
@@ -138,14 +160,10 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
                      param->create.status, param->create.service_handle);
             
             uint16_t gatt_service_handle = param->create.service_handle;
+            esp_bt_uuid_t char_uuid;
+            char_uuid.len = ESP_UUID_LEN_16;
+            char_uuid.uuid.uuid16 = GATTS_SDM_CHAR_UUID;
             esp_ble_gatts_start_service(gatt_service_handle);
-
-            esp_bt_uuid_t char_uuid = {
-                .len = ESP_UUID_LEN_128,
-            };
-
-            uint8_t gatt_char_uuid128[] = GATTS_SDM_CHAR_UUID;
-            memcpy(char_uuid.uuid.uuid128, gatt_char_uuid128, sizeof(gatt_char_uuid128));
 
             esp_attr_value_t gatt_char_value = {
                 .attr_max_len = CHAR_SIZE,
@@ -298,8 +316,8 @@ static void sdm_sensor_task(void *arg)
     {
         if (xSemaphoreTake(sensor_sphr, portMAX_DELAY) != pdTRUE) continue;
         
-        gpio_set_level(GPIO_LED_CTRL, 1);
-        gpio_set_level(GPIO_NIR_CTRL, 0);
+        // gpio_set_level(GPIO_LED_CTRL, 1);
+        // gpio_set_level(GPIO_NIR_CTRL, 0);
 
         // Check the current mode and perform the corresponding measurement
         if (use_f1f4_clear_nir_mode)
@@ -342,11 +360,11 @@ static void sdm_sensor_task(void *arg)
         {
             ESP_LOGE(TAG, "Failed to read sensor data");
         }
-        
+
         use_f1f4_clear_nir_mode = !use_f1f4_clear_nir_mode;
 
-        gpio_set_level(GPIO_LED_CTRL, 0);
-        gpio_set_level(GPIO_NIR_CTRL, 1);
+        // gpio_set_level(GPIO_LED_CTRL, 0);
+        // gpio_set_level(GPIO_NIR_CTRL, 1);
     }
 }
 
@@ -423,7 +441,32 @@ static void sdm_ble_init()
         return;
     }
 
-    esp_ble_gatt_set_local_mtu(ESP_GATT_MAX_MTU_SIZE - 1);  // 516 bytes
+    ret = esp_ble_gatt_set_local_mtu(ESP_GATT_MAX_MTU_SIZE - 1);  // 516 bytes
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "gatts mtu value set error, error code = %x", ret);
+        return;
+    }
+
+    // set the security iocap and auth_req & key size & init key response key parameters to the stack
+    esp_ble_auth_req_t auth_req = ESP_LE_AUTH_REQ_SC_MITM_BOND;  // bonding with peer device after authentication
+    esp_ble_io_cap_t iocap = ESP_IO_CAP_NONE;                    // set the IO capability to no output no input
+    uint8_t key_size = 16;                                       // the key size should be 7-16 bytes
+    uint8_t init_key = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
+    uint8_t rsp_key = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
+
+    // set static passkey
+    uint32_t passkey = 123456;
+    uint8_t auth_option = ESP_BLE_ONLY_ACCEPT_SPECIFIED_AUTH_DISABLE;
+    uint8_t oob_support = ESP_BLE_OOB_DISABLE;
+    esp_ble_gap_set_security_param(ESP_BLE_SM_SET_STATIC_PASSKEY, &passkey, sizeof(uint32_t));
+    esp_ble_gap_set_security_param(ESP_BLE_SM_AUTHEN_REQ_MODE, &auth_req, sizeof(uint8_t));
+    esp_ble_gap_set_security_param(ESP_BLE_SM_IOCAP_MODE, &iocap, sizeof(uint8_t));
+    esp_ble_gap_set_security_param(ESP_BLE_SM_MAX_KEY_SIZE, &key_size, sizeof(uint8_t));
+    esp_ble_gap_set_security_param(ESP_BLE_SM_ONLY_ACCEPT_SPECIFIED_SEC_AUTH, &auth_option, sizeof(uint8_t));
+    esp_ble_gap_set_security_param(ESP_BLE_SM_OOB_SUPPORT, &oob_support, sizeof(uint8_t));
+    esp_ble_gap_set_security_param(ESP_BLE_SM_SET_INIT_KEY, &init_key, sizeof(uint8_t));
+    esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY, &rsp_key, sizeof(uint8_t));
 }
 
 static void sdm_gpio_init()
