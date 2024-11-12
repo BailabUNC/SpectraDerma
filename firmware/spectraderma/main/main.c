@@ -15,44 +15,59 @@
 #include "esp_bt_main.h"
 #include "esp_gatt_common_api.h"
 #include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "driver/gptimer.h"
+#include "driver/ledc.h"
 #include "sdkconfig.h"
 
 #include "sdm_as7341.h"
 
-#define LED_CTRL_GPIO                       0
-#define LED_PWM_GPIO                        1
-#define I2C_MASTER_SCL_IO                   18
-#define I2C_MASTER_SDA_IO                   19
-#define I2C_MASTER_FREQ_HZ                  1000000  // 1 MHz
+#define GPIO_LED_CTRL                       GPIO_NUM_0
+#define GPIO_NIR_CTRL                       GPIO_NUM_4
+
+#define LEDC_MODE                           LEDC_LOW_SPEED_MODE
+#define LEDC_TIMER                          LEDC_TIMER_0
+#define LEDC_DUTY_RESOLUTION                LEDC_TIMER_8_BIT
+#define LEDC_FREQUENCY                      10000
+
+// PWM for AS clock signal
+#define LEDC_AS_OUTPUT_IO                   GPIO_NUM_10
+#define LEDC_AS_CHANNEL                     LEDC_CHANNEL_0
+#define LEDC_AS_DUTY                        127             // ((2 ** 8) - 1) * 50% = 127
+
+// PWM for LED brightness control
+#define LEDC_PWM_OUTPUT_IO                  GPIO_NUM_1
+#define LEDC_PWM_CHANNEL                    LEDC_CHANNEL_1
+#define LEDC_PWM_DUTY                       2               // ((2 ** 8) - 1) * 1% = 2
+
+// I2C config
+#define I2C_MASTER_SCL_IO                   GPIO_NUM_18
+#define I2C_MASTER_SDA_IO                   GPIO_NUM_19
+#define I2C_MASTER_FREQ_HZ                  1000000         // 1 MHz
 #define I2C_MASTER_NUM                      I2C_NUM_0
 
-#define TIMER_ALARM_US                      1000
+// Timer for measurement and BLE
+#define TIMER_ALARM_US                      10000
 #define BUFFER_SIZE                         1
-#define CHANNEL_COUNT                       10
+#define CHANNEL_COUNT                       12
 #define CHAR_SIZE                           (CHANNEL_COUNT * BUFFER_SIZE * 6 + 1)
 
+static bool use_f1f4_clear_nir_mode =       true;
+
 // UUIDs
-#define GATTS_SERVICE_UUID_TEST             0x00FF
-#define GATTS_CHAR_UUID_TEST_A              0xFF01
-#define GATTS_NUM_HANDLE_TEST               4
+#define GATTS_SDM_SERVICE_UUID              {0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0}
+#define GATTS_SDM_CHAR_UUID                 {0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef}
+#define GATTS_DESCR_UUID                    0x3333
+#define GATTS_NUM_HANDLE                    4
 
-#define PROFILE_NUM                         1
-#define PROFILE_APP_IDX                     0
-
-#define CHAR_DECLARATION_SIZE               (sizeof(uint8_t))
-
-// static uint8_t adv_config_done =            0;
-uint16_t gatt_service_handle =              0;
-esp_gatt_char_prop_t gatt_char_property =   0;
-esp_attr_value_t gatt_char_value = {
-    .attr_max_len = CHAR_SIZE,
-    .attr_value = NULL,
-};
-static esp_gatt_srvc_id_t gatt_service_id;
+// BLE
 static uint16_t connection_id =             0;
 static esp_gatt_if_t gatt_if =              0;
 static uint16_t gatt_char_handle =          0;
+static uint16_t descr_handle =              0;
+static esp_bt_uuid_t descr_uuid;
+
+static bool is_ready_for_notif =            false;
 static bool is_connected =                  false;
 
 static esp_ble_adv_data_t adv_data = {
@@ -98,56 +113,147 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
         case ESP_GATTS_REG_EVT:
             ESP_LOGI(TAG, "REGISTER_APP_EVT, status = %d, app_id = %d",
                      param->reg.status, param->reg.app_id);
-            
-            gatt_service_id.is_primary = true;
-            gatt_service_id.id.inst_id = 0x00;
-            gatt_service_id.id.uuid.len = ESP_UUID_LEN_16;
-            gatt_service_id.id.uuid.uuid.uuid16 = GATTS_SERVICE_UUID_TEST;
+
+            esp_gatt_srvc_id_t gatt_service_id = {
+                .id = {
+                    .inst_id = 0x00,
+                    .uuid = {
+                        .len = ESP_UUID_LEN_128,
+                    },
+                },
+                .is_primary = true,
+            };
+
+            uint8_t gatt_service_uuid128[] = GATTS_SDM_SERVICE_UUID;
+            memcpy(gatt_service_id.id.uuid.uuid.uuid128, gatt_service_uuid128, sizeof(gatt_service_uuid128));
 
             esp_ble_gap_set_device_name("SpectraDerma");
             esp_ble_gap_config_adv_data(&adv_data);
 
-            esp_ble_gatts_create_service(gatts_if, &gatt_service_id, GATTS_NUM_HANDLE_TEST);
+            esp_ble_gatts_create_service(gatts_if, &gatt_service_id, 4);
             break;
 
         case ESP_GATTS_CREATE_EVT:
             ESP_LOGI(TAG, "CREATE_SERVICE_EVT, status = %d, service handle = %d",
                      param->create.status, param->create.service_handle);
             
-            gatt_service_handle = param->create.service_handle;
+            uint16_t gatt_service_handle = param->create.service_handle;
             esp_ble_gatts_start_service(gatt_service_handle);
 
             esp_bt_uuid_t char_uuid = {
-                .len = ESP_UUID_LEN_16,
-                .uuid.uuid16 = GATTS_CHAR_UUID_TEST_A,
+                .len = ESP_UUID_LEN_128,
             };
 
-            gatt_char_property = ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_NOTIFY;
+            uint8_t gatt_char_uuid128[] = GATTS_SDM_CHAR_UUID;
+            memcpy(char_uuid.uuid.uuid128, gatt_char_uuid128, sizeof(gatt_char_uuid128));
 
-            esp_err_t add_char_ret = esp_ble_gatts_add_char(gatt_service_handle,
-                                                            &char_uuid,
-                                                            ESP_GATT_PERM_READ,
-                                                            gatt_char_property,
-                                                            &gatt_char_value,
-                                                            NULL);
+            esp_attr_value_t gatt_char_value = {
+                .attr_max_len = CHAR_SIZE,
+                .attr_value = NULL,
+            };
+
+            esp_err_t add_char_ret = esp_ble_gatts_add_char(
+                gatt_service_handle,
+                &char_uuid,
+                ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
+                ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_NOTIFY,
+                &gatt_char_value,
+                NULL
+            );
 
             if (add_char_ret != ESP_OK)
             {
                 ESP_LOGE(TAG, "Add char failed, error code %x", add_char_ret);
             }
             break;
-        
+
+        case ESP_GATTS_READ_EVT:
+            ESP_LOGI(TAG, "ESP_GATTS_READ_EVT, handle = %d", param->read.handle);
+
+            // Check if the handle corresponds to the characteristic
+            if (param->read.handle == gatt_char_handle)
+            {
+                esp_gatt_rsp_t rsp;
+                memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
+                rsp.attr_value.handle = param->read.handle;
+
+                // Convert notify_buffer to a UTF-8 string (comma-separated)
+                char rsp_string[CHAR_SIZE];
+                int offset = 0;
+                
+                for (int i = 0; i < BUFFER_SIZE; i++)
+                {
+                    for (int j = 0; j < CHANNEL_COUNT; j++)
+                    {
+                        offset += snprintf(rsp_string + offset, CHAR_SIZE - offset, "%d,", notify_buffer[i][j]);
+                        if (offset >= CHAR_SIZE - 1) break;  // Ensure we don't overflow the buffer
+                    }
+                }
+
+                // Remove the trailing comma and terminate the string
+                if (offset > 0 && rsp_string[offset - 1] == ',')
+                {
+                    rsp_string[offset - 1] = '\0';
+                }
+
+                rsp.attr_value.len = strlen(rsp_string);
+                memcpy(rsp.attr_value.value, rsp_string, rsp.attr_value.len);
+                
+                esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id, ESP_GATT_OK, &rsp);
+            }
+            break;
+
         case ESP_GATTS_ADD_CHAR_EVT:
+        {
             ESP_LOGI(TAG, "ADD_CHAR_EVT, status = %d, attr_handle = %d, service_handle = %d",
                      param->add_char.status, param->add_char.attr_handle, param->add_char.service_handle);
             gatt_char_handle = param->add_char.attr_handle;
+            descr_uuid.len = ESP_UUID_LEN_16;
+            descr_uuid.uuid.uuid16 = ESP_GATT_UUID_CHAR_CLIENT_CONFIG;
+            esp_ble_gatts_add_char_descr(
+                param->add_char.service_handle, &descr_uuid,
+                ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
+                NULL, NULL);
             break;
-        
+        }
+        case ESP_GATTS_ADD_CHAR_DESCR_EVT:
+            ESP_LOGI(TAG, "ADD_DESCR_EVT, status %d, attr_handle %d, service_handle %d",
+                    param->add_char_descr.status, param->add_char_descr.attr_handle, param->add_char_descr.service_handle);
+            descr_handle = param->add_char_descr.attr_handle;
+            break;
+
         case ESP_GATTS_CONNECT_EVT:
             ESP_LOGI(TAG, "ESP_GATTS_CONNECT_EVT, conn_id = %d", param->connect.conn_id);
             connection_id = param->connect.conn_id;
             gatt_if = gatts_if;
             is_connected = true;
+
+            vTaskDelay(pdMS_TO_TICKS(100));
+            is_ready_for_notif = true;
+            break;
+
+        case ESP_GATTS_WRITE_EVT:
+            ESP_LOGI(TAG, "GATT_WRITE_EVT, conn_id %d, trans_id %ld, handle %d\n", param->write.conn_id, param->write.trans_id, param->write.handle);
+            if (!param->write.is_prep)
+            {
+                ESP_LOGI(TAG, "GATT_WRITE_EVT, value len %d, value: ", param->write.len);
+                esp_log_buffer_hex(TAG, param->write.value, param->write.len);
+                uint16_t descr_value = param->write.value[1]<<8 | param->write.value[0];
+
+                if (descr_value == 0x0001)
+                {
+                    ESP_LOGI(TAG, "Notify enabled.");
+                    // esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gatt_char_handle, sizeof(placeholder), placeholder, false);
+                }
+                else if (descr_value == 0x0000)
+                {
+                    ESP_LOGI(TAG, "Notify disabled.");
+                }
+                else
+                {
+                    ESP_LOGE(TAG, "Unknown value written.");
+                }
+            }
             break;
 
         case ESP_GATTS_DISCONNECT_EVT:
@@ -174,7 +280,7 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
     }
 }
 
-static bool IRAM_ATTR sdm_on_alarm(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_ctx)
+static bool IRAM_ATTR sdm_intr_callback(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_ctx)
 {
     BaseType_t higher_priority_task_woken = pdFALSE;
     xSemaphoreGiveFromISR(sensor_sphr, &higher_priority_task_woken);
@@ -185,22 +291,45 @@ static bool IRAM_ATTR sdm_on_alarm(gptimer_handle_t timer, const gptimer_alarm_e
 
 static void sdm_sensor_task(void *arg)
 {
-    uint16_t reading_buffer[12];
+    esp_err_t ret;
+    uint16_t reading_buffer[6];
 
     while (1)
     {
         if (xSemaphoreTake(sensor_sphr, portMAX_DELAY) != pdTRUE) continue;
         
-        gpio_set_level(LED_CTRL_GPIO, 1);
+        gpio_set_level(GPIO_LED_CTRL, 1);
+        gpio_set_level(GPIO_NIR_CTRL, 0);
 
-        esp_err_t ret = sdm_as7341_read_all_channels(&as7341_sensor, reading_buffer);
+        // Check the current mode and perform the corresponding measurement
+        if (use_f1f4_clear_nir_mode)
+            ret = sdm_as7341_start_measure(&as7341_sensor, AS7341_CH_F1F4_CLEAR_NIR);
+        else
+            ret = sdm_as7341_start_measure(&as7341_sensor, AS7341_CH_F5F8_CLEAR_NIR);
+
         if (ret == ESP_OK)
         {
-            for (int i = 0; i < CHANNEL_COUNT; i++)
+            sdm_as7341_read_channel_data(&as7341_sensor, reading_buffer);
+
+            if (use_f1f4_clear_nir_mode)
             {
-                notify_buffer[buffer_index][i] = reading_buffer[i];  // fill the notify_buffer with new reading
+                // Fill the first 6 channels when in F1F4 mode
+                for (int i = 0; i < 6; i++)
+                {
+                    notify_buffer[buffer_index][i] = reading_buffer[i];
+                }
             }
-            buffer_index++;
+            else
+            {
+                // Fill the last 6 channels (7th location onward) when in F5F8 mode
+                for (int i = 0; i < 6; i++)
+                {
+                    notify_buffer[buffer_index][i + 6] = reading_buffer[i];
+                }
+
+                // Only increase buffer_index after F5F8 data is filled
+                buffer_index++;
+            }
 
             // If buffer is full, signal BLE task
             if (buffer_index >= BUFFER_SIZE)
@@ -213,8 +342,11 @@ static void sdm_sensor_task(void *arg)
         {
             ESP_LOGE(TAG, "Failed to read sensor data");
         }
+        
+        use_f1f4_clear_nir_mode = !use_f1f4_clear_nir_mode;
 
-        gpio_set_level(LED_CTRL_GPIO, 0);
+        gpio_set_level(GPIO_LED_CTRL, 0);
+        gpio_set_level(GPIO_NIR_CTRL, 1);
     }
 }
 
@@ -223,7 +355,7 @@ static void sdm_ble_task(void *arg)
     while (1)
     {
         if (xSemaphoreTake(ble_sphr, portMAX_DELAY) != pdTRUE) continue;
-        if (!is_connected) continue;
+        if (!is_connected || !is_ready_for_notif) continue;
 
         char data_string[CHAR_SIZE];
         int offset = 0;
@@ -248,10 +380,7 @@ static void sdm_ble_task(void *arg)
                                                     strlen(data_string),
                                                     (uint8_t *) data_string,
                                                     false);
-        if (ret != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to send notification, error code: %x", ret);
-        }
+        if (ret != ESP_OK) ESP_LOGE(TAG, "Failed to send notification, error code: %x", ret);
     }
 }
 
@@ -287,28 +416,66 @@ static void sdm_ble_init()
         return;
     }
 
-    ret = esp_ble_gatts_app_register(PROFILE_APP_IDX);
+    ret = esp_ble_gatts_app_register(0);
     if (ret != ESP_OK)
     {
         ESP_LOGE(TAG, "gatts app register error, error code = %x", ret);
         return;
     }
 
-    esp_ble_gatt_set_local_mtu(517);
+    esp_ble_gatt_set_local_mtu(ESP_GATT_MAX_MTU_SIZE - 1);  // 516 bytes
 }
 
 static void sdm_gpio_init()
 {
     // Configure GPIO
     gpio_config_t io_config = {
-        .pin_bit_mask = (1ULL << LED_CTRL_GPIO),
+        .pin_bit_mask = (1ULL << GPIO_LED_CTRL | 1ULL << GPIO_NIR_CTRL),
         .mode = GPIO_MODE_OUTPUT,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&io_config);
-    gpio_set_level(LED_CTRL_GPIO, 1);
+    gpio_set_level(GPIO_LED_CTRL, 1);
+    gpio_set_level(GPIO_NIR_CTRL, 1);
+}
+
+static void sdm_ledc_init()
+{
+    // Prepare and set configuration of timer for LEDC
+    ledc_timer_config_t ledc_timer = {
+        .speed_mode = LEDC_MODE,
+        .timer_num = LEDC_TIMER,
+        .duty_resolution = LEDC_DUTY_RESOLUTION,
+        .freq_hz = LEDC_FREQUENCY,
+        .clk_cfg = LEDC_AUTO_CLK,
+    };
+    ledc_timer_config(&ledc_timer);
+
+    // Prepare and set configuration LEDC channel for AS7341 GPIO pin
+    ledc_channel_config_t ledc_as_channel = {
+        .speed_mode = LEDC_MODE,
+        .channel = LEDC_AS_CHANNEL,
+        .timer_sel = LEDC_TIMER,
+        .intr_type = LEDC_INTR_DISABLE,
+        .gpio_num = LEDC_AS_OUTPUT_IO,
+        .duty = LEDC_AS_DUTY,
+        .hpoint = 0,
+    };
+    ledc_channel_config(&ledc_as_channel);
+    
+    // Prepare and set configuration LEDC channel for LED PWM
+    ledc_channel_config_t ledc_pwm_channel = {
+        .speed_mode = LEDC_MODE,
+        .channel = LEDC_PWM_CHANNEL,
+        .timer_sel = LEDC_TIMER,
+        .intr_type = LEDC_INTR_DISABLE,
+        .gpio_num = LEDC_PWM_OUTPUT_IO,
+        .duty = LEDC_PWM_DUTY,
+        .hpoint = 0,
+    };
+    ledc_channel_config(&ledc_pwm_channel);
 }
 
 static void sdm_wire_init()
@@ -341,8 +508,6 @@ static void sdm_wire_init()
 
 static void sdm_gptimer_init()
 {
-    esp_err_t ret;
-
     // Create semaphores
     sensor_sphr = xSemaphoreCreateBinary();
     ble_sphr = xSemaphoreCreateBinary();
@@ -358,8 +523,7 @@ static void sdm_gptimer_init()
         .direction = GPTIMER_COUNT_UP,
         .resolution_hz = 1000000,  // 1 MHz
     };
-    ret = gptimer_new_timer(&timer_config, &gptimer);
-    ESP_ERROR_CHECK(ret);
+    gptimer_new_timer(&timer_config, &gptimer);
 
     // Set up alarm for the timer
     gptimer_alarm_config_t alarm_config = {
@@ -369,28 +533,24 @@ static void sdm_gptimer_init()
             .auto_reload_on_alarm = true,
         }
     };
-    ret = gptimer_set_alarm_action(gptimer, &alarm_config);
-    ESP_ERROR_CHECK(ret);
+    gptimer_set_alarm_action(gptimer, &alarm_config);
 
     // Register the timer callback
     gptimer_event_callbacks_t cbs = {
-        .on_alarm = sdm_on_alarm,
+        .on_alarm = sdm_intr_callback,
     };
-    ret = gptimer_register_event_callbacks(gptimer, &cbs, NULL);
-    ESP_ERROR_CHECK(ret);
-
-    ret = gptimer_enable(gptimer);
-    ESP_ERROR_CHECK(ret);
-    ret = gptimer_start(gptimer);
-    ESP_ERROR_CHECK(ret);
+    gptimer_register_event_callbacks(gptimer, &cbs, NULL);
+    gptimer_enable(gptimer);
+    gptimer_start(gptimer);
 }
 
 void app_main(void)
 {
     sdm_gpio_init();
+    sdm_ledc_init();
     sdm_wire_init();
-    sdm_gptimer_init();
     sdm_ble_init();
+    sdm_gptimer_init();
 
     // Main loop
     while (1)

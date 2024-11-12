@@ -7,10 +7,10 @@
 
 static const char *TAG = "SDM_AS7341";
 
-#define ACK_CHECK_EN               0x1              /*!< I2C master will check ack from slave */
-#define ACK_CHECK_DIS              0x0              /*!< I2C master will not check ack from slave */
-#define ACK_VAL                    0x0              /*!< I2C ack value */
-#define NACK_VAL                   0x1              /*!< I2C nack value */
+#define ACK_CHECK_EN                0x1              /*!< I2C master will check ack from slave */
+#define ACK_CHECK_DIS               0x0              /*!< I2C master will not check ack from slave */
+#define ACK_VAL                     0x0              /*!< I2C ack value */
+#define NACK_VAL                    0x1              /*!< I2C nack value */
 
 // Initialize the AS7341 sensor
 esp_err_t sdm_as7341_init(sdm_as7341_t *dev, i2c_port_t port, uint8_t addr)
@@ -37,20 +37,20 @@ esp_err_t sdm_as7341_init(sdm_as7341_t *dev, i2c_port_t port, uint8_t addr)
     }
     ESP_LOGI(TAG, "AS7341 found: WHOAMI: 0x%02X", whoami);
 
-    uint8_t enable_reg;
-    uint8_t cfg6_reg;
-    ret = sdm_as7341_read_reg(dev, AS7341_ENABLE, &enable_reg);
-    ret = sdm_as7341_read_reg(dev, AS7341_CFG6, &cfg6_reg);
-    ESP_LOGI("REG_CHECK", "init: AS7341_ENABLE register initial value: 0x%02X", enable_reg);
-    ESP_LOGI("REG_CHECK", "init: AS7341_CFG6 register initial value: 0x%02X", cfg6_reg);
-    sdm_as7341_enable(dev, true);
-
-    /* Integration time = (ATIME + 1) * (ASTEP + 1) * 2.78 us
-       ADC scale = (ATIME + 1) * (ASTEP + 1) 
-    */
+    // set to syns mode 
     sdm_as7341_set_integration_mode(dev, AS7341_INT_MODE_SYNS);
-    sdm_as7341_set_integration_time(dev, 19, 9);
-    sdm_as7341_set_gain(dev, AS7341_GAIN_512X);
+    sdm_as7341_set_gpio_state(dev, AS7341_GPIO_INPUT);
+
+    
+    sdm_as7341_set_integration_time(dev, SDM_AS7341_ATIME, SDM_AS7341_ASTEP);
+    sdm_as7341_set_gain(dev, SDM_AS7341_GAIN);
+
+    
+    sdm_as7341_set_wait_time(dev, SDM_AS7341_WTIME);
+
+    // enable device
+    sdm_as7341_enable(dev, true);
+    vTaskDelay(15);  // auto zero
 
     return ESP_OK;
 }
@@ -113,15 +113,6 @@ esp_err_t sdm_as7341_read_reg(sdm_as7341_t *dev, uint8_t reg, uint8_t *data_rd)
     return ret;
 }
 
-void sdm_as7341_log_registers(sdm_as7341_t *dev)
-{
-    uint8_t enable_reg = 0, status_reg = 0, status2_reg = 0;
-    sdm_as7341_read_reg(dev, AS7341_ENABLE, &enable_reg);
-    sdm_as7341_read_reg(dev, AS7341_STATUS, &status_reg);
-    sdm_as7341_read_reg(dev, AS7341_STATUS2, &status2_reg);
-    ESP_LOGI(TAG, "ENABLE: 0x%02X, STATUS: 0x%02X, STATUS2: 0x%02X", enable_reg, status_reg, status2_reg);
-}
-
 esp_err_t sdm_as7341_enable(sdm_as7341_t *dev, bool enable)
 {
     esp_err_t ret;
@@ -178,9 +169,36 @@ esp_err_t sdm_as7341_enable_spectral_measurement(sdm_as7341_t *dev, bool enable)
     return ret;
 }
 
+esp_err_t sdm_as7341_enable_wait(sdm_as7341_t *dev, bool enable)
+{
+    esp_err_t ret;
+    uint8_t enable_reg;
+
+    // Read the current value of AS7341_ENABLE register
+    sdm_as7341_read_reg(dev, AS7341_ENABLE, &enable_reg);
+
+    // Set or clear the wait enable bit (bit 3)
+    if (enable)
+    {
+        enable_reg |= (1 << 3);
+    }
+    else
+    {
+        enable_reg &= ~(1 << 3);
+    }
+
+    // Write the modified register
+    ret = sdm_as7341_write_reg(dev, AS7341_ENABLE, enable_reg);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to %s wiat", enable ? "enable" : "disable");
+    }
+
+    return ret;
+}
+
 esp_err_t sdm_as7341_enable_smux(sdm_as7341_t *dev, bool enable)
 {
-    
     esp_err_t ret;
     uint8_t enable_reg;
 
@@ -202,6 +220,39 @@ esp_err_t sdm_as7341_enable_smux(sdm_as7341_t *dev, bool enable)
     if (ret != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed to %s smux", enable ? "enable" : "disable");
+    }
+
+    return ret;
+}
+
+esp_err_t sdm_as7341_set_reg_bank(sdm_as7341_t *dev, sdm_as7341_reg_bank_t bank)
+{
+    esp_err_t ret;
+    uint8_t cfg0_reg;
+
+    // Read the current value of AS7341_CFG0 register
+    sdm_as7341_read_reg(dev, AS7341_CFG0, &cfg0_reg);
+
+    // Set or clear reg back bit (bit 4)
+    switch (bank)
+    {
+        case AS7341_REG_BANK_L:
+            cfg0_reg |= (1 << 4);
+            break;
+
+        case AS7341_REG_BANK_H:
+            cfg0_reg &= ~(1 << 4);
+            break;
+
+        default:
+            ESP_LOGE(TAG, "Wrong register bank selected.");
+            return ESP_ERR_INVALID_ARG;
+    }
+
+    ret = sdm_as7341_write_reg(dev, AS7341_CFG0, cfg0_reg);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to write to cfg0.");
     }
 
     return ret;
@@ -274,36 +325,63 @@ esp_err_t sdm_as7341_set_gain(sdm_as7341_t *dev, sdm_as7341_gain_t gain)
     return sdm_as7341_write_reg(dev, AS7341_CFG1, gain & 0x0F);
 }
 
+
+esp_err_t sdm_as7341_set_wait_time(sdm_as7341_t *dev, uint8_t wtime)
+{
+    esp_err_t ret;
+
+    // Set WTIME (0x83)
+    ret = sdm_as7341_write_reg(dev, AS7341_WTIME, wtime);
+    if (ret != ESP_OK) return ret;
+
+    return ESP_OK;
+}
+
+esp_err_t sdm_as7341_set_gpio_state(sdm_as7341_t *dev, sdm_as7341_gpio_mode_t gpio_mode)
+{
+    esp_err_t ret;
+    uint8_t gpio2_reg;
+
+    gpio2_reg = sdm_as7341_read_reg(dev, AS7341_GPIO2, &gpio2_reg);
+    gpio2_reg &= ~(0x0E);  // clear bit 3:1
+
+    // Set gpio mode
+    switch (gpio_mode)
+    {
+        case AS7341_GPIO_INPUT:
+            gpio2_reg |= (1 << 2);  // set bit 2
+            break;
+        
+        case AS7341_GPIO_OUTPUT:
+            gpio2_reg |= (1 << 1);  // set bit 1
+            break;
+
+        default:
+            ESP_LOGE(TAG, "Attempted to set a non-valid GPIO mode.");
+            return ESP_ERR_INVALID_ARG;
+    }
+    ret = sdm_as7341_write_reg(dev, AS7341_GPIO2, gpio2_reg);
+    if (ret != ESP_OK) return ret;
+
+    return ESP_OK;
+}
+
 esp_err_t sdm_as7341_start_measure(sdm_as7341_t *dev, sdm_channel_mapping_mode_t mode)
 {
     esp_err_t ret;
 
-    // Enable SMUX
-    ret = sdm_as7341_enable_smux(dev, true);
-    if (ret != ESP_OK) return ret;
-
-    // Configure SMUX
-    if (mode == AS7341_CH_F1F4_CLEAR_NIR)
-    {
-        ret = sdm_as7341_setup_f1f4_clear_nir(dev);
-    }
-    else if (mode == AS7341_CH_F5F8_CLEAR_NIR)
-    {
-        ret = sdm_as7341_setup_f5f8_clear_nir(dev);
-    }
-    else
-    {
-        ESP_LOGE(TAG, "Invalid channel mapping mode");
-        return ESP_ERR_INVALID_ARG;
-    }
+    // Disable SMUX to apply configuration
+    ret = sdm_as7341_enable_smux(dev, false);
     if (ret != ESP_OK) return ret;
 
     // Load SMUX configuration
-    ret = sdm_as7341_write_reg(dev, AS7341_CFG6, 0x01);
+    ret = sdm_as7341_write_reg(dev, AS7341_CFG6, 0x10);
     if (ret != ESP_OK) return ret;
 
-    // Disable SMUX to apply configuration
-    ret = sdm_as7341_enable_smux(dev, false);
+    // Configure SMUX
+    if (mode == AS7341_CH_F1F4_CLEAR_NIR) ret = sdm_as7341_setup_f1f4_clear_nir(dev);
+    else if (mode == AS7341_CH_F5F8_CLEAR_NIR) ret = sdm_as7341_setup_f5f8_clear_nir(dev);
+    else return ESP_ERR_INVALID_ARG;
     if (ret != ESP_OK) return ret;
 
     // Enable spectral measurement
@@ -407,13 +485,12 @@ esp_err_t sdm_as7341_read_channel_data(sdm_as7341_t *dev, uint16_t *data)
     esp_err_t ret;
 
     // Check if data is ready
-    uint8_t status;
-    ret = sdm_as7341_read_reg(dev, AS7341_STATUS2, &status);
-    if (ret != ESP_OK) return ret;
+    uint8_t status2;
+    sdm_as7341_read_reg(dev, AS7341_STATUS2, &status2);
 
-    if (!(status & 0x40))
+    if (!(status2 & 0x40))
     {  // Bit 6 indicates measurement complete
-        ESP_LOGW(TAG, "Measurement not completed, STATUS2: 0x%02X", status);
+        ESP_LOGW(TAG, "Measurement not completed, STATUS2: 0x%02X", status2);
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -432,39 +509,39 @@ esp_err_t sdm_as7341_read_channel_data(sdm_as7341_t *dev, uint16_t *data)
     return ESP_OK;
 }
 
-esp_err_t sdm_as7341_read_all_channels(sdm_as7341_t *dev, uint16_t *data)
-{
-    esp_err_t ret;
+// esp_err_t sdm_as7341_read_all_channels(sdm_as7341_t *dev, uint16_t *data)
+// {
+//     esp_err_t ret;
 
-    // First measurement: F1-F4, Clear, NIR
-    ret = sdm_as7341_start_measure(dev, AS7341_CH_F1F4_CLEAR_NIR);
-    if (ret != ESP_OK) return ret;
+//     // First measurement: F1-F4, Clear, NIR
+//     ret = sdm_as7341_start_measure(dev, AS7341_CH_F1F4_CLEAR_NIR);
+//     if (ret != ESP_OK) return ret;
 
-    // Wait for measurement to complete
-    vTaskDelay(pdMS_TO_TICKS(15));  // Adjust based on integration time
+//     // Wait for measurement to complete
+//     vTaskDelay(pdMS_TO_TICKS(15));  // Adjust based on integration time
 
-    // Read data
-    ret = sdm_as7341_read_channel_data(dev, data);  // data[0..5]
-    if (ret != ESP_OK) return ret;
+//     // Read data
+//     ret = sdm_as7341_read_channel_data(dev, data);  // data[0..5]
+//     if (ret != ESP_OK) return ret;
 
-    // Disable spectral measurement
-    ret = sdm_as7341_enable_spectral_measurement(dev, false);
-    if (ret != ESP_OK) return ret;
+//     // Disable spectral measurement
+//     ret = sdm_as7341_enable_spectral_measurement(dev, false);
+//     if (ret != ESP_OK) return ret;
 
-    // Second measurement: F5-F8, Clear, NIR
-    ret = sdm_as7341_start_measure(dev, AS7341_CH_F5F8_CLEAR_NIR);
-    if (ret != ESP_OK) return ret;
+//     // Second measurement: F5-F8, Clear, NIR
+//     ret = sdm_as7341_start_measure(dev, AS7341_CH_F5F8_CLEAR_NIR);
+//     if (ret != ESP_OK) return ret;
 
-    // Wait for measurement to complete
-    vTaskDelay(pdMS_TO_TICKS(15));  // Adjust based on integration time
+//     // Wait for measurement to complete
+//     vTaskDelay(pdMS_TO_TICKS(15));  // Adjust based on integration time
 
-    // Read data
-    ret = sdm_as7341_read_channel_data(dev, &data[6]);  // data[6..11]
-    if (ret != ESP_OK) return ret;
+//     // Read data
+//     ret = sdm_as7341_read_channel_data(dev, &data[6]);  // data[6..11]
+//     if (ret != ESP_OK) return ret;
 
-    // Disable spectral measurement
-    ret = sdm_as7341_enable_spectral_measurement(dev, false);
-    if (ret != ESP_OK) return ret;
+//     // Disable spectral measurement
+//     ret = sdm_as7341_enable_spectral_measurement(dev, false);
+//     if (ret != ESP_OK) return ret;
 
-    return ESP_OK;
-}
+//     return ESP_OK;
+// }
