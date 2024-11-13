@@ -9,6 +9,7 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "esp_bt.h"
+
 #include "esp_gap_ble_api.h"
 #include "esp_gatts_api.h"
 #include "esp_bt_defs.h"
@@ -21,6 +22,9 @@
 #include "sdkconfig.h"
 
 #include "sdm_as7341.h"
+
+
+static const char *TAG =                    "SDM";
 
 #define GPIO_LED_CTRL                       GPIO_NUM_0
 #define GPIO_NIR_CTRL                       GPIO_NUM_4
@@ -66,8 +70,8 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
 #define TEST_MANUFACTURER_DATA_LEN          17
 
 static uint8_t adv_config_done =            0;
-#define adv_config_flag                     (1 << 0)
-#define scan_rsp_config_flag                (1 << 1)
+#define ADV_CONFIG_FLAG                     (1 << 0)
+#define SCAN_RSP_CONFIG_FLAG                (1 << 1)
 
 static uint8_t adv_service_uuid128[32] = {
     /* LSB <--------------------------------------------------------------------------------> MSB */
@@ -106,16 +110,53 @@ static esp_ble_adv_data_t adv_data = {
     .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT),
 };
 
+// scan response data
+static esp_ble_adv_data_t scan_rsp_data = {
+    .set_scan_rsp = true,
+    .include_name = true,
+    .include_txpower = true,
+    //.min_interval = 0x0006,
+    //.max_interval = 0x0010,
+    .appearance = 0x00,
+    .manufacturer_len = 0, //TEST_MANUFACTURER_DATA_LEN,
+    .p_manufacturer_data =  NULL, //&test_manufacturer[0],
+    .service_data_len = 0,
+    .p_service_data = NULL,
+    .service_uuid_len = sizeof(adv_service_uuid128),
+    .p_service_uuid = adv_service_uuid128,
+    .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT),
+};
+
 static esp_ble_adv_params_t adv_params = {
-    .adv_int_min = 0x20,
-    .adv_int_max = 0x40,
-    .adv_type = ADV_TYPE_IND,
-    .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
-    .channel_map = ADV_CHNL_ALL,
+    .adv_int_min        = 0x20,
+    .adv_int_max        = 0x40,
+    .adv_type           = ADV_TYPE_IND,
+    .own_addr_type      = BLE_ADDR_TYPE_PUBLIC,
+    //.peer_addr            =
+    //.peer_addr_type       =
+    .channel_map        = ADV_CHNL_ALL,
     .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
 };
 
-static const char *TAG =                    "SDM";
+typedef struct {
+    esp_gatts_cb_t gatts_cb;
+    uint16_t gatts_if;
+    uint16_t app_id;
+    uint16_t connection_id;
+    uint16_t service_handle;
+    esp_gatt_srvc_id_t service_id;
+    uint16_t char_handle;
+    esp_bt_uuid_t char_uuid;
+    esp_gatt_perm_t perm;
+    esp_gatt_char_prop_t property;
+    uint16_t descr_handle;
+    esp_bt_uuid_t descr_uuid;
+} sdm_gatts_profile_t;
+
+static sdm_gatts_profile_t gatts_profile = {
+    .gatts_cb = gatts_event_handler,
+    .gatts_if = ESP_GATT_IF_NONE,
+};
 
 sdm_as7341_t                                as7341_sensor;
 uint16_t                                    notify_buffer[BUFFER_SIZE][CHANNEL_COUNT];
@@ -123,6 +164,52 @@ uint16_t                                    buffer_index = 0;
 
 SemaphoreHandle_t                           sensor_sphr;
 SemaphoreHandle_t                           ble_sphr;
+
+static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
+{
+    switch (event)
+    {
+        case ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT:
+            adv_config_done &= (~ADV_CONFIG_FLAG);
+            if (adv_config_done == 0)
+                esp_ble_gap_start_advertising(&adv_params);
+            break;
+
+        case ESP_GAP_BLE_SCAN_RSP_DATA_SET_COMPLETE_EVT:
+            adv_config_done &= (~SCAN_RSP_CONFIG_FLAG);
+            if (adv_config_done == 0)
+                esp_ble_gap_start_advertising(&adv_params);
+            break;
+
+        case ESP_GAP_BLE_ADV_START_COMPLETE_EVT:
+            // advertising start complete event to indicate advertising start successfully or failed
+            if (param->adv_start_cmpl.status != ESP_BT_STATUS_SUCCESS)
+                ESP_LOGE(TAG, "advertising start failed");
+            else
+                ESP_LOGI(TAG, "advertising start success");
+            break;
+
+        case ESP_GAP_BLE_ADV_STOP_COMPLETE_EVT:
+            if (param->adv_stop_cmpl.status != ESP_BT_STATUS_SUCCESS)
+                ESP_LOGE(TAG, "advertising stop failed");
+            else
+                ESP_LOGI(TAG, "advertising stop success");
+            break;
+
+        case ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT:
+            ESP_LOGI(TAG, "update connection params status = %d, min_int = %d, max_int = %d, conn_int = %d, latency = %d, timeout = %d",
+                     param->update_conn_params.status,
+                     param->update_conn_params.min_int,
+                     param->update_conn_params.max_int,
+                     param->update_conn_params.conn_int,
+                     param->update_conn_params.latency,
+                     param->update_conn_params.timeout);
+            break;
+
+        default:
+            break;
+    }
+}
 
 static void gatts_event_handler(esp_gatts_cb_event_t event,
                                 esp_gatt_if_t gatts_if,
@@ -134,36 +221,32 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
             ESP_LOGI(TAG, "REGISTER_APP_EVT, status = %d, app_id = %d",
                      param->reg.status, param->reg.app_id);
 
-            esp_gatt_srvc_id_t gatt_service_id = {
-                .id = {
-                    .inst_id = 0x00,
-                    .uuid = {
-                        .len = ESP_UUID_LEN_128,
-                    },
-                },
-                .is_primary = true,
-            };
-
-            gatt_service_id.is_primary = true;
-            gatt_service_id.id.inst_id = 0x00;
-            gatt_service_id.id.uuid.len = ESP_UUID_LEN_16;
-            gatt_service_id.id.uuid.uuid.uuid16 = GATTS_SDM_SERVICE_UUID;
+            gatts_profile.service_id.is_primary = true;
+            gatts_profile.service_id.id.inst_id = 0x00;
+            gatts_profile.service_id.id.uuid.len = ESP_UUID_LEN_16;
+            gatts_profile.service_id.id.uuid.uuid.uuid16 = GATTS_SDM_SERVICE_UUID;
 
             esp_ble_gap_set_device_name(DEVICE_NAME);
             esp_ble_gap_config_adv_data(&adv_data);
+            adv_config_done |= ADV_CONFIG_FLAG;
+            esp_ble_gap_config_adv_data(&scan_rsp_data);
+            adv_config_done |= SCAN_RSP_CONFIG_FLAG;
 
-            esp_ble_gatts_create_service(gatts_if, &gatt_service_id, 4);
+            esp_ble_gatts_create_service(gatts_if, &gatts_profile.service_id, 4);
+            break;
+
+        case ESP_GATTS_MTU_EVT:
+            ESP_LOGI(TAG, "ESP_GATTS_MTU_EVT, MTU %d", param->mtu.mtu);
             break;
 
         case ESP_GATTS_CREATE_EVT:
             ESP_LOGI(TAG, "CREATE_SERVICE_EVT, status = %d, service handle = %d",
                      param->create.status, param->create.service_handle);
             
-            uint16_t gatt_service_handle = param->create.service_handle;
-            esp_bt_uuid_t char_uuid;
-            char_uuid.len = ESP_UUID_LEN_16;
-            char_uuid.uuid.uuid16 = GATTS_SDM_CHAR_UUID;
-            esp_ble_gatts_start_service(gatt_service_handle);
+            gatts_profile.service_handle = param->create.service_handle;
+            gatts_profile.char_uuid.len = ESP_UUID_LEN_16;
+            gatts_profile.char_uuid.uuid.uuid16 = GATTS_SDM_CHAR_UUID;
+            esp_ble_gatts_start_service(gatts_profile.service_handle);
 
             esp_attr_value_t gatt_char_value = {
                 .attr_max_len = CHAR_SIZE,
@@ -171,54 +254,37 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
             };
 
             esp_err_t add_char_ret = esp_ble_gatts_add_char(
-                gatt_service_handle,
-                &char_uuid,
+                gatts_profile.service_handle,
+                &gatts_profile.char_uuid,
                 ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
-                ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_NOTIFY,
+                ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_NOTIFY,
                 &gatt_char_value,
                 NULL
             );
 
             if (add_char_ret != ESP_OK)
-            {
                 ESP_LOGE(TAG, "Add char failed, error code %x", add_char_ret);
-            }
             break;
 
         case ESP_GATTS_READ_EVT:
-            ESP_LOGI(TAG, "ESP_GATTS_READ_EVT, handle = %d", param->read.handle);
+            ESP_LOGI(TAG, "GATT_READ_EVT, conn_id %d, trans_id %" PRIu32 ", handle %d", param->read.conn_id, param->read.trans_id, param->read.handle);
 
-            // Check if the handle corresponds to the characteristic
-            if (param->read.handle == gatt_char_handle)
-            {
-                esp_gatt_rsp_t rsp;
-                memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
-                rsp.attr_value.handle = param->read.handle;
+            esp_gatt_rsp_t rsp;
+            memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
+            rsp.attr_value.handle = param->read.handle;
 
-                // Convert notify_buffer to a UTF-8 string (comma-separated)
-                char rsp_string[CHAR_SIZE];
-                int offset = 0;
-                
-                for (int i = 0; i < BUFFER_SIZE; i++)
-                {
-                    for (int j = 0; j < CHANNEL_COUNT; j++)
-                    {
-                        offset += snprintf(rsp_string + offset, CHAR_SIZE - offset, "%d,", notify_buffer[i][j]);
-                        if (offset >= CHAR_SIZE - 1) break;  // Ensure we don't overflow the buffer
-                    }
-                }
-
-                // Remove the trailing comma and terminate the string
-                if (offset > 0 && rsp_string[offset - 1] == ',')
-                {
-                    rsp_string[offset - 1] = '\0';
-                }
-
-                rsp.attr_value.len = strlen(rsp_string);
-                memcpy(rsp.attr_value.value, rsp_string, rsp.attr_value.len);
-                
-                esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id, ESP_GATT_OK, &rsp);
-            }
+            // Convert notify_buffer to a UTF-8 string (comma-separated)
+            char rsp_string[CHAR_SIZE];
+            int offset = 0;
+            
+            rsp.attr_value.handle = param->read.handle;
+            rsp.attr_value.len = 4;
+            rsp.attr_value.value[0] = 0xda;
+            rsp.attr_value.value[1] = 0xed;
+            rsp.attr_value.value[2] = 0xbe;
+            rsp.attr_value.value[3] = 0xef;
+            esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,
+                                        ESP_GATT_OK, &rsp);
             break;
 
         case ESP_GATTS_ADD_CHAR_EVT:
@@ -277,19 +343,6 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
         case ESP_GATTS_DISCONNECT_EVT:
             ESP_LOGI(TAG, "ESP_GATTS_DISCONNECT_EVT, reason = %d", param->disconnect.reason);
             is_connected = false;
-            esp_ble_gap_start_advertising(&adv_params);
-            break;
-
-        default:
-            break;
-    }
-}
-
-static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
-{
-    switch (event)
-    {
-        case ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT:
             esp_ble_gap_start_advertising(&adv_params);
             break;
 
@@ -447,26 +500,6 @@ static void sdm_ble_init()
         ESP_LOGE(TAG, "gatts mtu value set error, error code = %x", ret);
         return;
     }
-
-    // set the security iocap and auth_req & key size & init key response key parameters to the stack
-    esp_ble_auth_req_t auth_req = ESP_LE_AUTH_REQ_SC_MITM_BOND;  // bonding with peer device after authentication
-    esp_ble_io_cap_t iocap = ESP_IO_CAP_NONE;                    // set the IO capability to no output no input
-    uint8_t key_size = 16;                                       // the key size should be 7-16 bytes
-    uint8_t init_key = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
-    uint8_t rsp_key = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
-
-    // set static passkey
-    uint32_t passkey = 123456;
-    uint8_t auth_option = ESP_BLE_ONLY_ACCEPT_SPECIFIED_AUTH_DISABLE;
-    uint8_t oob_support = ESP_BLE_OOB_DISABLE;
-    esp_ble_gap_set_security_param(ESP_BLE_SM_SET_STATIC_PASSKEY, &passkey, sizeof(uint32_t));
-    esp_ble_gap_set_security_param(ESP_BLE_SM_AUTHEN_REQ_MODE, &auth_req, sizeof(uint8_t));
-    esp_ble_gap_set_security_param(ESP_BLE_SM_IOCAP_MODE, &iocap, sizeof(uint8_t));
-    esp_ble_gap_set_security_param(ESP_BLE_SM_MAX_KEY_SIZE, &key_size, sizeof(uint8_t));
-    esp_ble_gap_set_security_param(ESP_BLE_SM_ONLY_ACCEPT_SPECIFIED_SEC_AUTH, &auth_option, sizeof(uint8_t));
-    esp_ble_gap_set_security_param(ESP_BLE_SM_OOB_SUPPORT, &oob_support, sizeof(uint8_t));
-    esp_ble_gap_set_security_param(ESP_BLE_SM_SET_INIT_KEY, &init_key, sizeof(uint8_t));
-    esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY, &rsp_key, sizeof(uint8_t));
 }
 
 static void sdm_gpio_init()
