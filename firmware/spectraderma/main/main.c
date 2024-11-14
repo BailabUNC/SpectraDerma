@@ -82,11 +82,11 @@ static uint8_t adv_service_uuid128[32] = {
 };
 
 
-static uint16_t connection_id =             0;
-static esp_gatt_if_t gatt_if =              0;
-static uint16_t gatt_char_handle =          0;
-static uint16_t descr_handle =              0;
-static esp_bt_uuid_t descr_uuid;
+// static uint16_t connection_id =             0;
+// static esp_gatt_if_t gatt_if =              0;
+// static uint16_t gatt_char_handle =          0;
+// static uint16_t descr_handle =              0;
+// static esp_bt_uuid_t descr_uuid;
 
 static bool is_ready_for_notif =            false;
 static bool is_connected =                  false;
@@ -291,25 +291,26 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
         {
             ESP_LOGI(TAG, "ADD_CHAR_EVT, status = %d, attr_handle = %d, service_handle = %d",
                      param->add_char.status, param->add_char.attr_handle, param->add_char.service_handle);
-            gatt_char_handle = param->add_char.attr_handle;
-            descr_uuid.len = ESP_UUID_LEN_16;
-            descr_uuid.uuid.uuid16 = ESP_GATT_UUID_CHAR_CLIENT_CONFIG;
+            gatts_profile.char_handle = param->add_char.attr_handle;
+            gatts_profile.descr_uuid.len = ESP_UUID_LEN_16;
+            gatts_profile.descr_uuid.uuid.uuid16 = ESP_GATT_UUID_CHAR_CLIENT_CONFIG;
             esp_ble_gatts_add_char_descr(
-                param->add_char.service_handle, &descr_uuid,
+                param->add_char.service_handle, &gatts_profile.descr_uuid,
                 ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
                 NULL, NULL);
             break;
         }
         case ESP_GATTS_ADD_CHAR_DESCR_EVT:
             ESP_LOGI(TAG, "ADD_DESCR_EVT, status %d, attr_handle %d, service_handle %d",
-                    param->add_char_descr.status, param->add_char_descr.attr_handle, param->add_char_descr.service_handle);
-            descr_handle = param->add_char_descr.attr_handle;
+                     param->add_char_descr.status, param->add_char_descr.attr_handle, param->add_char_descr.service_handle);
+            gatts_profile.descr_handle = param->add_char_descr.attr_handle;
             break;
 
         case ESP_GATTS_CONNECT_EVT:
-            ESP_LOGI(TAG, "ESP_GATTS_CONNECT_EVT, conn_id = %d", param->connect.conn_id);
-            connection_id = param->connect.conn_id;
-            gatt_if = gatts_if;
+            ESP_LOGI(TAG, "ESP_GATTS_CONNECT_EVT, conn_id = %d",
+                     param->connect.conn_id);
+            gatts_profile.connection_id = param->connect.conn_id;
+            gatts_profile.gatts_if = gatts_if;
             is_connected = true;
 
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -327,7 +328,13 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
                 if (descr_value == 0x0001)
                 {
                     ESP_LOGI(TAG, "Notify enabled.");
-                    // esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gatt_char_handle, sizeof(placeholder), placeholder, false);
+                    uint8_t notify_data[15];
+                    for (int i = 0; i < sizeof(notify_data); ++i)
+                    {
+                        notify_data[i] = i%0xff;
+                    }
+                    esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gatts_profile.char_handle,
+                                                sizeof(notify_data), notify_data, false);
                 }
                 else if (descr_value == 0x0000)
                 {
@@ -338,6 +345,17 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
                     ESP_LOGE(TAG, "Unknown value written.");
                 }
             }
+            break;
+
+        case ESP_GATTS_EXEC_WRITE_EVT:
+            ESP_LOGI(TAG, "ESP_GATTS_EXEC_WRITE_EVT");
+            esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_OK, NULL);
+            break;
+
+        case ESP_GATTS_UNREG_EVT:
+            break;
+
+        case ESP_GATTS_ADD_INCL_SRVC_EVT:
             break;
 
         case ESP_GATTS_DISCONNECT_EVT:
@@ -445,9 +463,9 @@ static void sdm_ble_task(void *arg)
         }
 
         // Send notification
-        esp_err_t ret = esp_ble_gatts_send_indicate(gatt_if,
-                                                    connection_id,
-                                                    gatt_char_handle,
+        esp_err_t ret = esp_ble_gatts_send_indicate(gatts_profile.gatts_if,
+                                                    gatts_profile.connection_id,
+                                                    gatts_profile.char_handle,
                                                     strlen(data_string),
                                                     (uint8_t *) data_string,
                                                     false);
