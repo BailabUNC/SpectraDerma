@@ -14,6 +14,7 @@
 #include "esp_gatts_api.h"
 #include "esp_bt_defs.h"
 #include "esp_bt_main.h"
+#include "esp_gatt_defs.h"
 #include "esp_gatt_common_api.h"
 #include "driver/i2c.h"
 #include "driver/i2c_master.h"
@@ -61,13 +62,15 @@ static bool use_f1f4_clear_nir_mode =       true;
 // BLE
 static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
 
-#define GATTS_SDM_SERVICE_UUID              0x00FF
+#define GATTS_SDM_SERVICE_UUID              0xACEF
 #define GATTS_SDM_CHAR_UUID                 0xFF01
 #define GATTS_DESCR_UUID                    0x3333
 #define GATTS_NUM_HANDLE                    4
 
 #define DEVICE_NAME                         "SpectraDerma"
 #define TEST_MANUFACTURER_DATA_LEN          17
+
+#define PREPARE_BUF_MAX_SIZE                1024
 
 static uint8_t adv_config_done =            0;
 #define ADV_CONFIG_FLAG                     (1 << 0)
@@ -76,24 +79,14 @@ static uint8_t adv_config_done =            0;
 static uint8_t adv_service_uuid128[32] = {
     /* LSB <--------------------------------------------------------------------------------> MSB */
     //first uuid, 16bit, [12],[13] is the value
-    0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0xEE, 0x00, 0x00, 0x00,
+    0x3f, 0xca, 0xb1, 0x31, 0x62, 0x0d, 0x48, 0x85, 0x81, 0xd7, 0x44, 0xac, 0xef, 0x35, 0x30, 0x96,
     //second uuid, 32bit, [12], [13], [14], [15] is the value
-    0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00,
+    0x3f, 0xca, 0xb1, 0x31, 0x62, 0x0d, 0x48, 0x85, 0x81, 0xd7, 0x44, 0xad, 0xef, 0x35, 0x30, 0x96,
 };
-
-
-// static uint16_t connection_id =             0;
-// static esp_gatt_if_t gatt_if =              0;
-// static uint16_t gatt_char_handle =          0;
-// static uint16_t descr_handle =              0;
-// static esp_bt_uuid_t descr_uuid;
 
 static bool is_ready_for_notif =            false;
 static bool is_connected =                  false;
 
-// The length of adv data must be less than 31 bytes
-//static uint8_t test_manufacturer[TEST_MANUFACTURER_DATA_LEN] =  {0x12, 0x23, 0x45, 0x56};
-//adv data
 static esp_ble_adv_data_t adv_data = {
     .set_scan_rsp = false,
     .include_name = true,
@@ -158,6 +151,15 @@ static sdm_gatts_profile_t gatts_profile = {
     .gatts_if = ESP_GATT_IF_NONE,
 };
 
+typedef struct {
+    uint8_t                 *prepare_buf;
+    int                     prepare_len;
+} prepare_type_env_t;
+
+static prepare_type_env_t prepare_write_env;
+
+void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
+
 sdm_as7341_t                                as7341_sensor;
 uint16_t                                    notify_buffer[BUFFER_SIZE][CHANNEL_COUNT];
 uint16_t                                    buffer_index = 0;
@@ -208,6 +210,69 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
 
         default:
             break;
+    }
+}
+
+void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param)
+{
+    esp_gatt_status_t status = ESP_GATT_OK;
+    if (param->write.need_rsp)
+    {
+        if (param->write.is_prep)
+        {
+            if (param->write.offset > PREPARE_BUF_MAX_SIZE)
+            {
+                status = ESP_GATT_INVALID_OFFSET;
+            }
+            else if
+            ((param->write.offset + param->write.len) > PREPARE_BUF_MAX_SIZE)
+            {
+                status = ESP_GATT_INVALID_ATTR_LEN;
+            }
+            if (status == ESP_GATT_OK && prepare_write_env->prepare_buf == NULL)
+            {
+                prepare_write_env->prepare_buf = (uint8_t *) malloc(PREPARE_BUF_MAX_SIZE * sizeof(uint8_t));
+                prepare_write_env->prepare_len = 0;
+                if (prepare_write_env->prepare_buf == NULL)
+                {
+                    ESP_LOGE(TAG, "Gatt_server prep no mem");
+                    status = ESP_GATT_NO_RESOURCES;
+                }
+            }
+
+            esp_gatt_rsp_t *gatt_rsp = (esp_gatt_rsp_t *) malloc(sizeof(esp_gatt_rsp_t));
+            if (gatt_rsp)
+            {
+                gatt_rsp->attr_value.len = param->write.len;
+                gatt_rsp->attr_value.handle = param->write.handle;
+                gatt_rsp->attr_value.offset = param->write.offset;
+                gatt_rsp->attr_value.auth_req = ESP_GATT_AUTH_REQ_NONE;
+                memcpy(gatt_rsp->attr_value.value, param->write.value, param->write.len);
+                esp_err_t response_err = esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, status, gatt_rsp);
+                if (response_err != ESP_OK)
+                {
+                    ESP_LOGE(TAG, "Send response error\n");
+                }
+                free(gatt_rsp);
+            }
+            else
+            {
+                ESP_LOGE(TAG, "malloc failed, no resource to send response error\n");
+                status = ESP_GATT_NO_RESOURCES;
+            }
+            if (status != ESP_GATT_OK){
+                return;
+            }
+            memcpy(prepare_write_env->prepare_buf + param->write.offset,
+                   param->write.value,
+                   param->write.len);
+            prepare_write_env->prepare_len += param->write.len;
+
+        }
+        else
+        {
+            esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, status, NULL);
+        }
     }
 }
 
@@ -271,12 +336,6 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
 
             esp_gatt_rsp_t rsp;
             memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
-            rsp.attr_value.handle = param->read.handle;
-
-            // Convert notify_buffer to a UTF-8 string (comma-separated)
-            char rsp_string[CHAR_SIZE];
-            int offset = 0;
-            
             rsp.attr_value.handle = param->read.handle;
             rsp.attr_value.len = 4;
             rsp.attr_value.value[0] = 0xda;
@@ -345,6 +404,7 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
                     ESP_LOGE(TAG, "Unknown value written.");
                 }
             }
+            example_write_event_env(gatts_if, &prepare_write_env, param);
             break;
 
         case ESP_GATTS_EXEC_WRITE_EVT:

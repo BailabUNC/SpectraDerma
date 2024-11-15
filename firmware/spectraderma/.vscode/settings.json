@@ -16,6 +16,7 @@
     "idf.toolsPathWin": "C:\\Users\\y1hli\\.espressif",
     "idf.flashType": "UART",
     "files.associations": {
+        "*.py": "python",
         "nvs_flash.h": "c",
         "esp_gap_ble_api.h": "c",
         "gptimer.h": "c",
@@ -23,7 +24,8 @@
         "freertos.h": "c",
         "i2c.h": "c",
         "i2c_master.h": "c",
-        "i2c_types.h": "c"
+        "i2c_types.h": "c",
+        "esp_gatt_defs.h": "c"
     },
     "idf.gitPathWin": "C:\\Users\\y1hli\\.espressif\\tools\\idf-git\\2.39.2\\cmd\\git.exe"
 }
