@@ -95,7 +95,7 @@ static esp_ble_adv_data_t adv_data = {
     .max_interval = 0x0010, //slave connection max interval, Time = max_interval * 1.25 msec
     .appearance = 0x00,
     .manufacturer_len = 0, //TEST_MANUFACTURER_DATA_LEN,
-    .p_manufacturer_data =  NULL, //&test_manufacturer[0],
+    .p_manufacturer_data = NULL, //&test_manufacturer[0],
     .service_data_len = 0,
     .p_service_data = NULL,
     .service_uuid_len = sizeof(adv_service_uuid128),
@@ -112,7 +112,7 @@ static esp_ble_adv_data_t scan_rsp_data = {
     //.max_interval = 0x0010,
     .appearance = 0x00,
     .manufacturer_len = 0, //TEST_MANUFACTURER_DATA_LEN,
-    .p_manufacturer_data =  NULL, //&test_manufacturer[0],
+    .p_manufacturer_data = NULL, //&test_manufacturer[0],
     .service_data_len = 0,
     .p_service_data = NULL,
     .service_uuid_len = sizeof(adv_service_uuid128),
@@ -158,7 +158,7 @@ typedef struct {
 
 static prepare_type_env_t prepare_write_env;
 
-void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
+void write_prepare_handler(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
 
 sdm_as7341_t                                as7341_sensor;
 uint16_t                                    notify_buffer[BUFFER_SIZE][CHANNEL_COUNT];
@@ -213,7 +213,7 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
     }
 }
 
-void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param)
+void write_prepare_handler(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param)
 {
     esp_gatt_status_t status = ESP_GATT_OK;
     if (param->write.need_rsp)
@@ -224,11 +224,11 @@ void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare
             {
                 status = ESP_GATT_INVALID_OFFSET;
             }
-            else if
-            ((param->write.offset + param->write.len) > PREPARE_BUF_MAX_SIZE)
+            else if ((param->write.offset + param->write.len) > PREPARE_BUF_MAX_SIZE)
             {
                 status = ESP_GATT_INVALID_ATTR_LEN;
             }
+
             if (status == ESP_GATT_OK && prepare_write_env->prepare_buf == NULL)
             {
                 prepare_write_env->prepare_buf = (uint8_t *) malloc(PREPARE_BUF_MAX_SIZE * sizeof(uint8_t));
@@ -404,7 +404,7 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
                     ESP_LOGE(TAG, "Unknown value written.");
                 }
             }
-            example_write_event_env(gatts_if, &prepare_write_env, param);
+            write_prepare_handler(gatts_if, &prepare_write_env, param);
             break;
 
         case ESP_GATTS_EXEC_WRITE_EVT:
@@ -447,8 +447,8 @@ static void sdm_sensor_task(void *arg)
     {
         if (xSemaphoreTake(sensor_sphr, portMAX_DELAY) != pdTRUE) continue;
         
-        // gpio_set_level(GPIO_LED_CTRL, 1);
-        // gpio_set_level(GPIO_NIR_CTRL, 0);
+        gpio_set_level(GPIO_LED_CTRL, 1);
+        gpio_set_level(GPIO_NIR_CTRL, 1);
 
         // Check the current mode and perform the corresponding measurement
         if (use_f1f4_clear_nir_mode)
@@ -494,8 +494,8 @@ static void sdm_sensor_task(void *arg)
 
         use_f1f4_clear_nir_mode = !use_f1f4_clear_nir_mode;
 
-        // gpio_set_level(GPIO_LED_CTRL, 0);
-        // gpio_set_level(GPIO_NIR_CTRL, 1);
+        gpio_set_level(GPIO_LED_CTRL, 0);
+        gpio_set_level(GPIO_NIR_CTRL, 0);
     }
 }
 
