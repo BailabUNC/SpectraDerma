@@ -117,15 +117,13 @@ class BTVizApp(QtWidgets.QMainWindow):
         try: 
             self.dbHandler.notification_handler(sender=sender, data=data)
         except Exception as e:
-            raise Exception("There was an error in inserting the Data into the database: " + str(e))
+            raise Exception(f"There was an error in inserting the Data into the database: {str(e)}") from e
 
-        # Decode and parse the data
         try:
             text = data.decode('utf-8').strip()
             values = [float(v) for v in text.split(',')]
         except Exception as e:
             print(f"Failed to parse data: {e}")
-            return
         
         if not self.plots:
             # Initialize plots based on number of channels

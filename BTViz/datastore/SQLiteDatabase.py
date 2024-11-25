@@ -54,7 +54,7 @@ class SQLiteDatabase:
     def insert_data(self, values):
         """Insert a row of data into the database."""
         if len(values) != self.num_of_channels:
-            raise ValueError("Exactly 6 channel values are required.")
+            raise ValueError("Exactly 12 channel values are required.")
         try:
             cursor = self.connection.cursor()
             cursor.execute("""

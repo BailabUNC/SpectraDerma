@@ -13,8 +13,16 @@ class DBHandler:
         """Handle incoming BLE data and store it in the database."""
         try:
             text = data.decode('utf-8').strip()
-            values = [float(v) for v in text.split(',')]
+            
+            # Validate all values at once
+            try:
+                values = [float(v) for v in text.split(',')]
+            except ValueError:
+                print(f"Skipping entire batch due to invalid data: {e}")
+                return  # Skip this batch and move to the next
+            # Proceed only if all values are valid
             self.database.insert_data(values)
+
         except Exception as e:
             print(f"Failed to handle notification: {e}")
-            raise Exception
+            raise
