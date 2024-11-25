@@ -25,9 +25,10 @@ class SQLiteDatabase:
             # ensure folder exists
             folder = "dbs"
             os.makedirs(folder, exist_ok=True)
-            full_path = os.path.join(folder, db_path)
-
-            self.connection = sqlite3.connect(db_path)
+            full_path = os.path.abspath(os.path.join(folder, db_path))
+            full_path = os.path.normpath(full_path)
+            
+            self.connection = sqlite3.connect(full_path)
             cursor = self.connection.cursor()
             # Create a table optimized for time series data
             cursor.execute("""
