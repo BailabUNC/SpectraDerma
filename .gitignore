@@ -6,5 +6,5 @@ BTViz/datastore/dbs/
 BTViz/dbs
 dbs
 *dbs*
-
+*.db
 .idea
