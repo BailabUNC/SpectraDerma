@@ -18,8 +18,7 @@ class BTVizApp(QtWidgets.QMainWindow):
 
     # SQLite3 Database instaniation
     # REPLACE DB WITH REAL DB LOCATIONs
-    db: SQLiteDatabase = SQLiteDatabase("DB/data.db")
-    dbHandler: DBHandler = DBHandler(database=db)
+    
     
 
     def __init__(self):
@@ -33,6 +32,10 @@ class BTVizApp(QtWidgets.QMainWindow):
         self.curves = []
         self.timestamps = []
         self.init_ui()
+        
+        #db handler!!!
+        self.db: SQLiteDatabase = SQLiteDatabase("data.db")
+        self.dbHandler: DBHandler = DBHandler(database=self.db)
 
     def init_ui(self):
         # Create input dialog to get BLE device name
@@ -105,11 +108,12 @@ class BTVizApp(QtWidgets.QMainWindow):
         Handle incoming data from the BLE device.
         """
 
+        # print(data)
         # DB Handler
         try: 
-            DBHandler.notification_handler(sender=sender, data=data)
-        except Exception:
-            raise Exception("There was an error in inserting the Data into the database")
+            self.dbHandler.notification_handler(sender=sender, data=data)
+        except Exception as e:
+            raise Exception("There was an error in inserting the Data into the database: " + str(e))
 
         # Decode and parse the data
         try:

@@ -1,5 +1,6 @@
 # virtual env
 BTViz/.venv/
 BTViz/bin/
+BTViz/datastore/__pycache__/
 
 .idea

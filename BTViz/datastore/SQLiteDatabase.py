@@ -54,8 +54,8 @@ class SQLiteDatabase:
         try:
             cursor = self.connection.cursor()
             cursor.execute("""
-                INSERT INTO data (channel_1, channel_2, channel_3, channel_4, channel_5, channel_6)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO data (channel_1, channel_2, channel_3, channel_4, channel_5, channel_6, channel_7, channel_8, channel_9, channel_10, channel_11, channel_12)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, values)
             self.connection.commit()
         except Error as e:

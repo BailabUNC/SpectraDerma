@@ -1,5 +1,5 @@
 from datetime import datetime
-from SQLiteDatabase import SQLiteDatabase
+from datastore.SQLiteDatabase import SQLiteDatabase
 
 class DBHandler:
     def __init__(self, database: SQLiteDatabase):
