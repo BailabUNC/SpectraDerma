@@ -7,7 +7,7 @@
 
 import sqlite3
 from sqlite3 import Error
-
+import os
 class SQLiteDatabase:
 
     # static num_of_channels:
@@ -22,7 +22,13 @@ class SQLiteDatabase:
     def _connect(self, db_path):
         """Connect to the SQLite database."""
         try:
-            self.connection = sqlite3.connect(db_path)
+            # ensure folder exists
+            folder = "dbs"
+            os.makedirs(folder, exist_ok=True)
+            full_path = os.path.join(folder, db_path)
+
+
+            self.connection = sqlite3.connect(full_path)
             cursor = self.connection.cursor()
             # Create a table optimized for time series data
             cursor.execute("""

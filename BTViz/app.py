@@ -2,6 +2,7 @@ import sys
 import logging
 import asyncio
 from collections import deque
+from datetime import datetime
 
 from bleak import BleakScanner, BleakClient
 from PyQt5 import QtWidgets, QtCore
@@ -33,8 +34,11 @@ class BTVizApp(QtWidgets.QMainWindow):
         self.timestamps = []
         self.init_ui()
         
+        # get current time when the app is initated:
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
         #db handler!!!
-        self.db: SQLiteDatabase = SQLiteDatabase("data.db")
+        self.db: SQLiteDatabase = SQLiteDatabase(f"{current_time}.db")
         self.dbHandler: DBHandler = DBHandler(database=self.db)
 
     def init_ui(self):
