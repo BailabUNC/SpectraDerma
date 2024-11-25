@@ -3,7 +3,8 @@ from datastore.DBHandler import DBHandler
 
 def main():
     # Dependency Injection
-    db = SQLiteDatabase(db_path="data.db")
+    file_path = input("Type in the file path: (including .db)")
+    db = SQLiteDatabase(file_path)
     data_handler = DBHandler(database=db)
 
     # Query and print data for verification

@@ -124,6 +124,7 @@ class BTVizApp(QtWidgets.QMainWindow):
             values = [float(v) for v in text.split(',')]
         except Exception as e:
             print(f"Failed to parse data: {e}")
+            return
         
         if not self.plots:
             # Initialize plots based on number of channels

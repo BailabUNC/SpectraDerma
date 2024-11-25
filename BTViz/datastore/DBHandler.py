@@ -17,7 +17,7 @@ class DBHandler:
             # Validate all values at once
             try:
                 values = [float(v) for v in text.split(',')]
-            except ValueError:
+            except ValueError as e:
                 print(f"Skipping entire batch due to invalid data: {e}")
                 return  # Skip this batch and move to the next
             # Proceed only if all values are valid
