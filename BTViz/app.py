@@ -9,9 +9,19 @@ from pyqtgraph import PlotWidget, mkPen
 import pyqtgraph as pg
 from qasync import QEventLoop, asyncSlot
 
+#SQLite3 imports
+from datastore.SQLiteDatabase import SQLiteDatabase
+from datastore.DBHandler import DBHandler
 logger = logging.getLogger(__name__)
 
 class BTVizApp(QtWidgets.QMainWindow):
+
+    # SQLite3 Database instaniation
+    # REPLACE DB WITH REAL DB LOCATIONs
+    db: SQLiteDatabase = SQLiteDatabase("DB/data.db")
+    dbHandler: DBHandler = DBHandler(database=db)
+    
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle('BTViz')
@@ -94,6 +104,13 @@ class BTVizApp(QtWidgets.QMainWindow):
         """
         Handle incoming data from the BLE device.
         """
+
+        # DB Handler
+        try: 
+            DBHandler.notification_handler(sender=sender, data=data)
+        except Exception:
+            raise Exception("There was an error in inserting the Data into the database")
+
         # Decode and parse the data
         try:
             text = data.decode('utf-8').strip()
@@ -101,7 +118,7 @@ class BTVizApp(QtWidgets.QMainWindow):
         except Exception as e:
             print(f"Failed to parse data: {e}")
             return
-
+        
         if not self.plots:
             # Initialize plots based on number of channels
             num_channels = len(values)
