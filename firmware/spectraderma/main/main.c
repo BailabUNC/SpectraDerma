@@ -9,10 +9,12 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "esp_bt.h"
+
 #include "esp_gap_ble_api.h"
 #include "esp_gatts_api.h"
 #include "esp_bt_defs.h"
 #include "esp_bt_main.h"
+#include "esp_gatt_defs.h"
 #include "esp_gatt_common_api.h"
 #include "driver/i2c.h"
 #include "driver/i2c_master.h"
@@ -21,6 +23,9 @@
 #include "sdkconfig.h"
 
 #include "sdm_as7341.h"
+
+
+static const char *TAG =                    "SDM";
 
 #define GPIO_LED_CTRL                       GPIO_NUM_0
 #define GPIO_NIR_CTRL                       GPIO_NUM_4
@@ -54,18 +59,30 @@
 
 static bool use_f1f4_clear_nir_mode =       true;
 
-// UUIDs
-#define GATTS_SDM_SERVICE_UUID              {0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0}
-#define GATTS_SDM_CHAR_UUID                 {0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef}
+// BLE
+static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
+
+#define GATTS_SDM_SERVICE_UUID              0xACEF
+#define GATTS_SDM_CHAR_UUID                 0xFF01
 #define GATTS_DESCR_UUID                    0x3333
 #define GATTS_NUM_HANDLE                    4
 
-// BLE
-static uint16_t connection_id =             0;
-static esp_gatt_if_t gatt_if =              0;
-static uint16_t gatt_char_handle =          0;
-static uint16_t descr_handle =              0;
-static esp_bt_uuid_t descr_uuid;
+#define DEVICE_NAME                         "SpectraDerma"
+#define TEST_MANUFACTURER_DATA_LEN          17
+
+#define PREPARE_BUF_MAX_SIZE                1024
+
+static uint8_t adv_config_done =            0;
+#define ADV_CONFIG_FLAG                     (1 << 0)
+#define SCAN_RSP_CONFIG_FLAG                (1 << 1)
+
+static uint8_t adv_service_uuid128[32] = {
+    /* LSB <--------------------------------------------------------------------------------> MSB */
+    //first uuid, 16bit, [12],[13] is the value
+    0x3f, 0xca, 0xb1, 0x31, 0x62, 0x0d, 0x48, 0x85, 0x81, 0xd7, 0x44, 0xac, 0xef, 0x35, 0x30, 0x96,
+    //second uuid, 32bit, [12], [13], [14], [15] is the value
+    0x3f, 0xca, 0xb1, 0x31, 0x62, 0x0d, 0x48, 0x85, 0x81, 0xd7, 0x44, 0xad, 0xef, 0x35, 0x30, 0x96,
+};
 
 static bool is_ready_for_notif =            false;
 static bool is_connected =                  false;
@@ -73,29 +90,75 @@ static bool is_connected =                  false;
 static esp_ble_adv_data_t adv_data = {
     .set_scan_rsp = false,
     .include_name = true,
-    .include_txpower = true,
-    .min_interval = 0x0006,                 // 7.5 ms
-    .max_interval = 0x0010,                 // 20 ms
+    .include_txpower = false,
+    .min_interval = 0x0006, //slave connection min interval, Time = min_interval * 1.25 msec
+    .max_interval = 0x0010, //slave connection max interval, Time = max_interval * 1.25 msec
     .appearance = 0x00,
-    .manufacturer_len = 0,
-    .p_manufacturer_data = NULL,
+    .manufacturer_len = 0, //TEST_MANUFACTURER_DATA_LEN,
+    .p_manufacturer_data = NULL, //&test_manufacturer[0],
     .service_data_len = 0,
     .p_service_data = NULL,
-    .service_uuid_len = 0,
-    .p_service_uuid = NULL,
+    .service_uuid_len = sizeof(adv_service_uuid128),
+    .p_service_uuid = adv_service_uuid128,
+    .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT),
+};
+
+// scan response data
+static esp_ble_adv_data_t scan_rsp_data = {
+    .set_scan_rsp = true,
+    .include_name = true,
+    .include_txpower = true,
+    //.min_interval = 0x0006,
+    //.max_interval = 0x0010,
+    .appearance = 0x00,
+    .manufacturer_len = 0, //TEST_MANUFACTURER_DATA_LEN,
+    .p_manufacturer_data = NULL, //&test_manufacturer[0],
+    .service_data_len = 0,
+    .p_service_data = NULL,
+    .service_uuid_len = sizeof(adv_service_uuid128),
+    .p_service_uuid = adv_service_uuid128,
     .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT),
 };
 
 static esp_ble_adv_params_t adv_params = {
-    .adv_int_min = 0x20,
-    .adv_int_max = 0x40,
-    .adv_type = ADV_TYPE_IND,
-    .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
-    .channel_map = ADV_CHNL_ALL,
+    .adv_int_min        = 0x20,
+    .adv_int_max        = 0x40,
+    .adv_type           = ADV_TYPE_IND,
+    .own_addr_type      = BLE_ADDR_TYPE_PUBLIC,
+    //.peer_addr            =
+    //.peer_addr_type       =
+    .channel_map        = ADV_CHNL_ALL,
     .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
 };
 
-static const char *TAG =                    "SDM";
+typedef struct {
+    esp_gatts_cb_t gatts_cb;
+    uint16_t gatts_if;
+    uint16_t app_id;
+    uint16_t connection_id;
+    uint16_t service_handle;
+    esp_gatt_srvc_id_t service_id;
+    uint16_t char_handle;
+    esp_bt_uuid_t char_uuid;
+    esp_gatt_perm_t perm;
+    esp_gatt_char_prop_t property;
+    uint16_t descr_handle;
+    esp_bt_uuid_t descr_uuid;
+} sdm_gatts_profile_t;
+
+static sdm_gatts_profile_t gatts_profile = {
+    .gatts_cb = gatts_event_handler,
+    .gatts_if = ESP_GATT_IF_NONE,
+};
+
+typedef struct {
+    uint8_t                 *prepare_buf;
+    int                     prepare_len;
+} prepare_type_env_t;
+
+static prepare_type_env_t prepare_write_env;
+
+void write_prepare_handler(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
 
 sdm_as7341_t                                as7341_sensor;
 uint16_t                                    notify_buffer[BUFFER_SIZE][CHANNEL_COUNT];
@@ -104,9 +167,116 @@ uint16_t                                    buffer_index = 0;
 SemaphoreHandle_t                           sensor_sphr;
 SemaphoreHandle_t                           ble_sphr;
 
-static void gatts_event_handler(esp_gatts_cb_event_t event,
-                                esp_gatt_if_t gatts_if,
-                                esp_ble_gatts_cb_param_t *param)
+static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
+{
+    switch (event)
+    {
+        case ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT:
+            adv_config_done &= (~ADV_CONFIG_FLAG);
+            if (adv_config_done == 0)
+                esp_ble_gap_start_advertising(&adv_params);
+            break;
+
+        case ESP_GAP_BLE_SCAN_RSP_DATA_SET_COMPLETE_EVT:
+            adv_config_done &= (~SCAN_RSP_CONFIG_FLAG);
+            if (adv_config_done == 0)
+                esp_ble_gap_start_advertising(&adv_params);
+            break;
+
+        case ESP_GAP_BLE_ADV_START_COMPLETE_EVT:
+            // advertising start complete event to indicate advertising start successfully or failed
+            if (param->adv_start_cmpl.status != ESP_BT_STATUS_SUCCESS)
+                ESP_LOGE(TAG, "advertising start failed");
+            else
+                ESP_LOGI(TAG, "advertising start success");
+            break;
+
+        case ESP_GAP_BLE_ADV_STOP_COMPLETE_EVT:
+            if (param->adv_stop_cmpl.status != ESP_BT_STATUS_SUCCESS)
+                ESP_LOGE(TAG, "advertising stop failed");
+            else
+                ESP_LOGI(TAG, "advertising stop success");
+            break;
+
+        case ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT:
+            ESP_LOGI(TAG, "update connection params status = %d, min_int = %d, max_int = %d, conn_int = %d, latency = %d, timeout = %d",
+                     param->update_conn_params.status,
+                     param->update_conn_params.min_int,
+                     param->update_conn_params.max_int,
+                     param->update_conn_params.conn_int,
+                     param->update_conn_params.latency,
+                     param->update_conn_params.timeout);
+            break;
+
+        default:
+            break;
+    }
+}
+
+static void write_prepare_handler(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param)
+{
+    esp_gatt_status_t status = ESP_GATT_OK;
+    if (param->write.need_rsp)
+    {
+        if (param->write.is_prep)
+        {
+            if (param->write.offset > PREPARE_BUF_MAX_SIZE)
+            {
+                status = ESP_GATT_INVALID_OFFSET;
+            }
+            else if ((param->write.offset + param->write.len) > PREPARE_BUF_MAX_SIZE)
+            {
+                status = ESP_GATT_INVALID_ATTR_LEN;
+            }
+
+            if (status == ESP_GATT_OK && prepare_write_env->prepare_buf == NULL)
+            {
+                prepare_write_env->prepare_buf = (uint8_t *) malloc(PREPARE_BUF_MAX_SIZE * sizeof(uint8_t));
+                prepare_write_env->prepare_len = 0;
+                if (prepare_write_env->prepare_buf == NULL)
+                {
+                    ESP_LOGE(TAG, "Gatt_server prep no mem");
+                    status = ESP_GATT_NO_RESOURCES;
+                }
+            }
+
+            esp_gatt_rsp_t *gatt_rsp = (esp_gatt_rsp_t *) malloc(sizeof(esp_gatt_rsp_t));
+            if (gatt_rsp)
+            {
+                gatt_rsp->attr_value.len = param->write.len;
+                gatt_rsp->attr_value.handle = param->write.handle;
+                gatt_rsp->attr_value.offset = param->write.offset;
+                gatt_rsp->attr_value.auth_req = ESP_GATT_AUTH_REQ_NONE;
+                memcpy(gatt_rsp->attr_value.value, param->write.value, param->write.len);
+                esp_err_t response_err = esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, status, gatt_rsp);
+                if (response_err != ESP_OK)
+                {
+                    ESP_LOGE(TAG, "Send response error\n");
+                }
+                free(gatt_rsp);
+            }
+            else
+            {
+                ESP_LOGE(TAG, "malloc failed, no resource to send response error\n");
+                status = ESP_GATT_NO_RESOURCES;
+            }
+            if (status != ESP_GATT_OK){
+                return;
+            }
+            memcpy(prepare_write_env->prepare_buf + param->write.offset,
+                   param->write.value,
+                   param->write.len);
+            prepare_write_env->prepare_len += param->write.len;
+
+        }
+        else
+        {
+            esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, status, NULL);
+        }
+    }
+}
+
+static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
 {
     switch (event)
     {
@@ -114,38 +284,32 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
             ESP_LOGI(TAG, "REGISTER_APP_EVT, status = %d, app_id = %d",
                      param->reg.status, param->reg.app_id);
 
-            esp_gatt_srvc_id_t gatt_service_id = {
-                .id = {
-                    .inst_id = 0x00,
-                    .uuid = {
-                        .len = ESP_UUID_LEN_128,
-                    },
-                },
-                .is_primary = true,
-            };
+            gatts_profile.service_id.is_primary = true;
+            gatts_profile.service_id.id.inst_id = 0x00;
+            gatts_profile.service_id.id.uuid.len = ESP_UUID_LEN_16;
+            gatts_profile.service_id.id.uuid.uuid.uuid16 = GATTS_SDM_SERVICE_UUID;
 
-            uint8_t gatt_service_uuid128[] = GATTS_SDM_SERVICE_UUID;
-            memcpy(gatt_service_id.id.uuid.uuid.uuid128, gatt_service_uuid128, sizeof(gatt_service_uuid128));
-
-            esp_ble_gap_set_device_name("SpectraDerma");
+            esp_ble_gap_set_device_name(DEVICE_NAME);
             esp_ble_gap_config_adv_data(&adv_data);
+            adv_config_done |= ADV_CONFIG_FLAG;
+            esp_ble_gap_config_adv_data(&scan_rsp_data);
+            adv_config_done |= SCAN_RSP_CONFIG_FLAG;
 
-            esp_ble_gatts_create_service(gatts_if, &gatt_service_id, 4);
+            esp_ble_gatts_create_service(gatts_if, &gatts_profile.service_id, 4);
+            break;
+
+        case ESP_GATTS_MTU_EVT:
+            ESP_LOGI(TAG, "ESP_GATTS_MTU_EVT, MTU %d", param->mtu.mtu);
             break;
 
         case ESP_GATTS_CREATE_EVT:
             ESP_LOGI(TAG, "CREATE_SERVICE_EVT, status = %d, service handle = %d",
                      param->create.status, param->create.service_handle);
             
-            uint16_t gatt_service_handle = param->create.service_handle;
-            esp_ble_gatts_start_service(gatt_service_handle);
-
-            esp_bt_uuid_t char_uuid = {
-                .len = ESP_UUID_LEN_128,
-            };
-
-            uint8_t gatt_char_uuid128[] = GATTS_SDM_CHAR_UUID;
-            memcpy(char_uuid.uuid.uuid128, gatt_char_uuid128, sizeof(gatt_char_uuid128));
+            gatts_profile.service_handle = param->create.service_handle;
+            gatts_profile.char_uuid.len = ESP_UUID_LEN_16;
+            gatts_profile.char_uuid.uuid.uuid16 = GATTS_SDM_CHAR_UUID;
+            esp_ble_gatts_start_service(gatts_profile.service_handle);
 
             esp_attr_value_t gatt_char_value = {
                 .attr_max_len = CHAR_SIZE,
@@ -153,79 +317,57 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
             };
 
             esp_err_t add_char_ret = esp_ble_gatts_add_char(
-                gatt_service_handle,
-                &char_uuid,
+                gatts_profile.service_handle,
+                &gatts_profile.char_uuid,
                 ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
-                ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_NOTIFY,
+                ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_NOTIFY,
                 &gatt_char_value,
                 NULL
             );
 
             if (add_char_ret != ESP_OK)
-            {
                 ESP_LOGE(TAG, "Add char failed, error code %x", add_char_ret);
-            }
             break;
 
         case ESP_GATTS_READ_EVT:
-            ESP_LOGI(TAG, "ESP_GATTS_READ_EVT, handle = %d", param->read.handle);
+            ESP_LOGI(TAG, "GATT_READ_EVT, conn_id %d, trans_id %" PRIu32 ", handle %d", param->read.conn_id, param->read.trans_id, param->read.handle);
 
-            // Check if the handle corresponds to the characteristic
-            if (param->read.handle == gatt_char_handle)
-            {
-                esp_gatt_rsp_t rsp;
-                memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
-                rsp.attr_value.handle = param->read.handle;
-
-                // Convert notify_buffer to a UTF-8 string (comma-separated)
-                char rsp_string[CHAR_SIZE];
-                int offset = 0;
-                
-                for (int i = 0; i < BUFFER_SIZE; i++)
-                {
-                    for (int j = 0; j < CHANNEL_COUNT; j++)
-                    {
-                        offset += snprintf(rsp_string + offset, CHAR_SIZE - offset, "%d,", notify_buffer[i][j]);
-                        if (offset >= CHAR_SIZE - 1) break;  // Ensure we don't overflow the buffer
-                    }
-                }
-
-                // Remove the trailing comma and terminate the string
-                if (offset > 0 && rsp_string[offset - 1] == ',')
-                {
-                    rsp_string[offset - 1] = '\0';
-                }
-
-                rsp.attr_value.len = strlen(rsp_string);
-                memcpy(rsp.attr_value.value, rsp_string, rsp.attr_value.len);
-                
-                esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id, ESP_GATT_OK, &rsp);
-            }
+            esp_gatt_rsp_t rsp;
+            memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
+            rsp.attr_value.handle = param->read.handle;
+            rsp.attr_value.len = 4;
+            rsp.attr_value.value[0] = 0xda;
+            rsp.attr_value.value[1] = 0xed;
+            rsp.attr_value.value[2] = 0xbe;
+            rsp.attr_value.value[3] = 0xef;
+            esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,
+                                        ESP_GATT_OK, &rsp);
             break;
 
         case ESP_GATTS_ADD_CHAR_EVT:
         {
             ESP_LOGI(TAG, "ADD_CHAR_EVT, status = %d, attr_handle = %d, service_handle = %d",
                      param->add_char.status, param->add_char.attr_handle, param->add_char.service_handle);
-            gatt_char_handle = param->add_char.attr_handle;
-            descr_uuid.len = ESP_UUID_LEN_16;
-            descr_uuid.uuid.uuid16 = ESP_GATT_UUID_CHAR_CLIENT_CONFIG;
+            gatts_profile.char_handle = param->add_char.attr_handle;
+            gatts_profile.descr_uuid.len = ESP_UUID_LEN_16;
+            gatts_profile.descr_uuid.uuid.uuid16 = ESP_GATT_UUID_CHAR_CLIENT_CONFIG;
             esp_ble_gatts_add_char_descr(
-                param->add_char.service_handle, &descr_uuid,
+                param->add_char.service_handle, &gatts_profile.descr_uuid,
                 ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
                 NULL, NULL);
             break;
         }
         case ESP_GATTS_ADD_CHAR_DESCR_EVT:
             ESP_LOGI(TAG, "ADD_DESCR_EVT, status %d, attr_handle %d, service_handle %d",
-                    param->add_char_descr.status, param->add_char_descr.attr_handle, param->add_char_descr.service_handle);
-            descr_handle = param->add_char_descr.attr_handle;
+                     param->add_char_descr.status, param->add_char_descr.attr_handle, param->add_char_descr.service_handle);
+            gatts_profile.descr_handle = param->add_char_descr.attr_handle;
             break;
 
         case ESP_GATTS_CONNECT_EVT:
-            ESP_LOGI(TAG, "ESP_GATTS_CONNECT_EVT, conn_id = %d", param->connect.conn_id);
-            connection_id = param->connect.conn_id;
-            gatt_if = gatts_if;
+            ESP_LOGI(TAG, "ESP_GATTS_CONNECT_EVT, conn_id = %d",
+                     param->connect.conn_id);
+            gatts_profile.connection_id = param->connect.conn_id;
+            gatts_profile.gatts_if = gatts_if;
             is_connected = true;
 
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -233,7 +375,7 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
             break;
 
         case ESP_GATTS_WRITE_EVT:
-            ESP_LOGI(TAG, "GATT_WRITE_EVT, conn_id %d, trans_id %ld, handle %d\n", param->write.conn_id, param->write.trans_id, param->write.handle);
+            ESP_LOGI(TAG, "GATT_WRITE_EVT, conn_id %d, trans_id %" PRIu32 ", handle %d", param->write.conn_id, param->write.trans_id, param->write.handle);
             if (!param->write.is_prep)
             {
                 ESP_LOGI(TAG, "GATT_WRITE_EVT, value len %d, value: ", param->write.len);
@@ -243,7 +385,13 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
                 if (descr_value == 0x0001)
                 {
                     ESP_LOGI(TAG, "Notify enabled.");
-                    // esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gatt_char_handle, sizeof(placeholder), placeholder, false);
+                    uint8_t notify_data[15];
+                    for (int i = 0; i < sizeof(notify_data); ++i)
+                    {
+                        notify_data[i] = i%0xff;
+                    }
+                    esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gatts_profile.char_handle,
+                                                sizeof(notify_data), notify_data, false);
                 }
                 else if (descr_value == 0x0000)
                 {
@@ -254,24 +402,23 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
                     ESP_LOGE(TAG, "Unknown value written.");
                 }
             }
+            write_prepare_handler(gatts_if, &prepare_write_env, param);
+            break;
+
+        case ESP_GATTS_EXEC_WRITE_EVT:
+            ESP_LOGI(TAG, "ESP_GATTS_EXEC_WRITE_EVT");
+            esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_OK, NULL);
+            break;
+
+        case ESP_GATTS_UNREG_EVT:
+            break;
+
+        case ESP_GATTS_ADD_INCL_SRVC_EVT:
             break;
 
         case ESP_GATTS_DISCONNECT_EVT:
             ESP_LOGI(TAG, "ESP_GATTS_DISCONNECT_EVT, reason = %d", param->disconnect.reason);
             is_connected = false;
-            esp_ble_gap_start_advertising(&adv_params);
-            break;
-
-        default:
-            break;
-    }
-}
-
-static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
-{
-    switch (event)
-    {
-        case ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT:
             esp_ble_gap_start_advertising(&adv_params);
             break;
 
@@ -299,7 +446,7 @@ static void sdm_sensor_task(void *arg)
         if (xSemaphoreTake(sensor_sphr, portMAX_DELAY) != pdTRUE) continue;
         
         gpio_set_level(GPIO_LED_CTRL, 1);
-        gpio_set_level(GPIO_NIR_CTRL, 0);
+        gpio_set_level(GPIO_NIR_CTRL, 1);
 
         // Check the current mode and perform the corresponding measurement
         if (use_f1f4_clear_nir_mode)
@@ -342,11 +489,11 @@ static void sdm_sensor_task(void *arg)
         {
             ESP_LOGE(TAG, "Failed to read sensor data");
         }
-        
+
         use_f1f4_clear_nir_mode = !use_f1f4_clear_nir_mode;
 
         gpio_set_level(GPIO_LED_CTRL, 0);
-        gpio_set_level(GPIO_NIR_CTRL, 1);
+        gpio_set_level(GPIO_NIR_CTRL, 0);
     }
 }
 
@@ -374,9 +521,9 @@ static void sdm_ble_task(void *arg)
         }
 
         // Send notification
-        esp_err_t ret = esp_ble_gatts_send_indicate(gatt_if,
-                                                    connection_id,
-                                                    gatt_char_handle,
+        esp_err_t ret = esp_ble_gatts_send_indicate(gatts_profile.gatts_if,
+                                                    gatts_profile.connection_id,
+                                                    gatts_profile.char_handle,
                                                     strlen(data_string),
                                                     (uint8_t *) data_string,
                                                     false);
@@ -423,7 +570,12 @@ static void sdm_ble_init()
         return;
     }
 
-    esp_ble_gatt_set_local_mtu(ESP_GATT_MAX_MTU_SIZE - 1);  // 516 bytes
+    ret = esp_ble_gatt_set_local_mtu(ESP_GATT_MAX_MTU_SIZE - 1);  // 516 bytes
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "gatts mtu value set error, error code = %x", ret);
+        return;
+    }
 }
 
 static void sdm_gpio_init()

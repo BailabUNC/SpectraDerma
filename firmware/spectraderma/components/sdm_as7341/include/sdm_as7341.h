@@ -83,10 +83,10 @@
     ADC scale = (ATIME + 1) * (ASTEP + 1)
     Wait time = (WTIME + 1) * 2.78 ms
 */
-#define SDM_AS7341_ATIME        19
-#define SDM_AS7341_ASTEP        19
+#define SDM_AS7341_ATIME        16
+#define SDM_AS7341_ASTEP        16
 #define SDM_AS7341_WTIME        0
-#define SDM_AS7341_GAIN         AS7341_GAIN_128X
+#define SDM_AS7341_GAIN         AS7341_GAIN_256X
 
 #define AS7341_SPECTRAL_INT_HIGH_MSK    0b00100000  ///< bitmask to check for a high threshold interrupt
 #define AS7341_SPECTRAL_INT_LOW_MSK     0b00010000  ///< bitmask to check for a low threshold interrupt
@@ -242,6 +242,5 @@ esp_err_t sdm_as7341_set_wait_time(sdm_as7341_t *dev, uint8_t wtime);
 esp_err_t sdm_as7341_set_gpio_state(sdm_as7341_t *dev, sdm_as7341_gpio_mode_t gpio_mode);
 
 esp_err_t sdm_as7341_read_channel_data(sdm_as7341_t *dev, uint16_t *data);
-// esp_err_t sdm_as7341_read_all_channels(sdm_as7341_t *dev, uint16_t *data);
 
 #endif  // AS7341_H

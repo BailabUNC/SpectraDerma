@@ -41,11 +41,9 @@ esp_err_t sdm_as7341_init(sdm_as7341_t *dev, i2c_port_t port, uint8_t addr)
     sdm_as7341_set_integration_mode(dev, AS7341_INT_MODE_SYNS);
     sdm_as7341_set_gpio_state(dev, AS7341_GPIO_INPUT);
 
-    
     sdm_as7341_set_integration_time(dev, SDM_AS7341_ATIME, SDM_AS7341_ASTEP);
     sdm_as7341_set_gain(dev, SDM_AS7341_GAIN);
 
-    
     sdm_as7341_set_wait_time(dev, SDM_AS7341_WTIME);
 
     // enable device
@@ -398,9 +396,9 @@ esp_err_t sdm_as7341_setup_f1f4_clear_nir(sdm_as7341_t *dev)
     // SMUX configuration for F1-F4, Clear, NIR
     // These values are based on the AS7341 datasheet
     uint8_t smux_conf[] = {
-        0x00, 0x00,
-        0x01, 0x30,
-        0x02, 0x01,
+        0x00, 0x30,
+        0x01, 0x01,
+        0x02, 0x00,
         0x03, 0x00,
         0x04, 0x00,
         0x05, 0x42,
@@ -410,7 +408,14 @@ esp_err_t sdm_as7341_setup_f1f4_clear_nir(sdm_as7341_t *dev)
         0x09, 0x00,
         0x0A, 0x00,
         0x0B, 0x00,
-        0x0C, 0x00,
+        0x0C, 0x20,
+        0x0D, 0x04,
+        0x0E, 0x00,
+        0x0F, 0x30,
+        0x10, 0x01,
+        0x11, 0x50,
+        0x12, 0x00,
+        0x13, 0x06
     };
 
     // Write SMUX configuration
@@ -445,16 +450,23 @@ esp_err_t sdm_as7341_setup_f5f8_clear_nir(sdm_as7341_t *dev)
         0x00, 0x00,
         0x01, 0x00,
         0x02, 0x00,
-        0x03, 0x00,
-        0x04, 0x00,
+        0x03, 0x40,
+        0x04, 0x02,
         0x05, 0x00,
-        0x06, 0x04,
-        0x07, 0x30,
-        0x08, 0x00,
-        0x09, 0x24,
-        0x0A, 0x00,
+        0x06, 0x10,
+        0x07, 0x03,
+        0x08, 0x50,
+        0x09, 0x10,
+        0x0A, 0x03,
         0x0B, 0x00,
         0x0C, 0x00,
+        0x0D, 0x00,
+        0x0E, 0x24,
+        0x0F, 0x00,
+        0x10, 0x00,
+        0x11, 0x50,
+        0x12, 0x00,
+        0x13, 0x06
     };
 
     // Write SMUX configuration
@@ -508,40 +520,3 @@ esp_err_t sdm_as7341_read_channel_data(sdm_as7341_t *dev, uint16_t *data)
 
     return ESP_OK;
 }
-
-// esp_err_t sdm_as7341_read_all_channels(sdm_as7341_t *dev, uint16_t *data)
-// {
-//     esp_err_t ret;
-
-//     // First measurement: F1-F4, Clear, NIR
-//     ret = sdm_as7341_start_measure(dev, AS7341_CH_F1F4_CLEAR_NIR);
-//     if (ret != ESP_OK) return ret;
-
-//     // Wait for measurement to complete
-//     vTaskDelay(pdMS_TO_TICKS(15));  // Adjust based on integration time
-
-//     // Read data
-//     ret = sdm_as7341_read_channel_data(dev, data);  // data[0..5]
-//     if (ret != ESP_OK) return ret;
-
-//     // Disable spectral measurement
-//     ret = sdm_as7341_enable_spectral_measurement(dev, false);
-//     if (ret != ESP_OK) return ret;
-
-//     // Second measurement: F5-F8, Clear, NIR
-//     ret = sdm_as7341_start_measure(dev, AS7341_CH_F5F8_CLEAR_NIR);
-//     if (ret != ESP_OK) return ret;
-
-//     // Wait for measurement to complete
-//     vTaskDelay(pdMS_TO_TICKS(15));  // Adjust based on integration time
-
-//     // Read data
-//     ret = sdm_as7341_read_channel_data(dev, &data[6]);  // data[6..11]
-//     if (ret != ESP_OK) return ret;
-
-//     // Disable spectral measurement
-//     ret = sdm_as7341_enable_spectral_measurement(dev, false);
-//     if (ret != ESP_OK) return ret;
-
-//     return ESP_OK;
-// }

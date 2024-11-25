@@ -27,7 +27,7 @@ class BTVizApp(QtWidgets.QMainWindow):
     def init_ui(self):
         # Create input dialog to get BLE device name
         self.device_name, ok = QtWidgets.QInputDialog.getText(
-            self, 'Device Name Input', 'Enter BLE Device Name:')
+            self, 'Device Name Input', 'Enter BLE Device Name:', QtWidgets.QLineEdit.EchoMode.Normal, 'SpectraDerma')
         if not ok or not self.device_name:
             QtWidgets.QMessageBox.critical(
                 self, 'Error', 'No device name entered. Exiting.')
@@ -63,30 +63,32 @@ class BTVizApp(QtWidgets.QMainWindow):
         self.status_label.setText(f'Connecting to {self.device_name}...')
 
         # Connect to device
-        async with BleakClient(target_device, winrt=dict(use_cached_services=False)) as self.client:
-            try:
-                services = self.client.services
-                # Assuming only one custom service and characteristic
-                for service in services:
-                    for char in service.characteristics:
-                        if 'notify' in char.properties or 'indicate' in char.properties:
-                            self.characteristic_uuid = char.uuid
-                            break
+        try:
+            self.client = BleakClient(target_device, winrt=dict(use_cached_services=False))
+            await self.client.connect()
 
-                if not self.characteristic_uuid:
-                    QtWidgets.QMessageBox.critical(
-                        self, 'Error', 'No notifiable characteristic found.')
-                    sys.exit(1)
+            services = self.client.services
+            # Assuming only one custom service and characteristic
+            for service in services:
+                for char in service.characteristics:
+                    if 'notify' in char.properties or 'indicate' in char.properties:
+                        self.characteristic_uuid = char.uuid
+                        break
 
-                self.status_label.setText('Connected. Starting notifications...')
-                await asyncio.sleep(1.0)
-                await self.client.start_notify(self.characteristic_uuid, self.notification_handler)
-
-            except Exception as e:
+            if not self.characteristic_uuid:
                 QtWidgets.QMessageBox.critical(
-                    self, 'Error', f'Failed to connect: {e}')
-                print(e)
+                    self, 'Error', 'No notifiable characteristic found.')
                 sys.exit(1)
+
+            self.status_label.setText('Connected. Starting notifications...')
+            await asyncio.sleep(1.0)
+            await self.client.start_notify(self.characteristic_uuid, self.notification_handler)
+
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self, 'Error', f'Failed to connect: {e}')
+            print(e)
+            sys.exit(1)
 
     def notification_handler(self, sender, data):
         """
