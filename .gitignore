@@ -2,5 +2,6 @@
 BTViz/.venv/
 BTViz/bin/
 BTViz/datastore/__pycache__/
+BTViz/datastore/dbs/
 
 .idea
