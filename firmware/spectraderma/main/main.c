@@ -43,7 +43,7 @@ static const char *TAG =                    "SDM";
 // PWM for LED brightness control
 #define LEDC_PWM_OUTPUT_IO                  GPIO_NUM_1
 #define LEDC_PWM_CHANNEL                    LEDC_CHANNEL_1
-#define LEDC_PWM_DUTY                       10               // ((2 ** 8) - 1) * 1% = 2
+#define LEDC_PWM_DUTY                       2               // ((2 ** 8) - 1) * 1% = 2
 
 // I2C config
 #define I2C_MASTER_SCL_IO                   GPIO_NUM_18
@@ -213,7 +213,7 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
     }
 }
 
-void write_prepare_handler(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param)
+static void write_prepare_handler(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param)
 {
     esp_gatt_status_t status = ESP_GATT_OK;
     if (param->write.need_rsp)
@@ -276,9 +276,7 @@ void write_prepare_handler(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_w
     }
 }
 
-static void gatts_event_handler(esp_gatts_cb_event_t event,
-                                esp_gatt_if_t gatts_if,
-                                esp_ble_gatts_cb_param_t *param)
+static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
 {
     switch (event)
     {
