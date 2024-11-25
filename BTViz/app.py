@@ -35,7 +35,7 @@ class BTVizApp(QtWidgets.QMainWindow):
         self.init_ui()
         
         # get current time when the app is initated:
-        current_time = datetime.now().strftime('%Y-%m-%d-%H:%M:%S')
+        current_time = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
 
         #db handler!!!
         self.db: SQLiteDatabase = SQLiteDatabase(f"{current_time}.db")
