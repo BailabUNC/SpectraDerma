@@ -1,6 +1,5 @@
 
 """
-WRITTEN BY MIHIR SHARMA - NOV 23RD 2024
 
 /datastore is an alternate notification handler function, with the primary focus of storing data.
 
