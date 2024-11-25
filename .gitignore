@@ -3,5 +3,8 @@ BTViz/.venv/
 BTViz/bin/
 BTViz/datastore/__pycache__/
 BTViz/datastore/dbs/
+BTViz/dbs
+dbs
+*dbs*
 
 .idea
