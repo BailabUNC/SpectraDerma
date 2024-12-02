@@ -1,6 +1,8 @@
 # virtual env
 BTViz/.venv/
 BTViz/bin/
+
+# datastore
 BTViz/datastore/__pycache__/
 BTViz/datastore/dbs/
 BTViz/dbs
@@ -8,3 +10,8 @@ dbs
 *dbs*
 *.db
 .idea
+
+# python build
+BTViz/build/
+BTViz/dist/
+BTViz/app.spec

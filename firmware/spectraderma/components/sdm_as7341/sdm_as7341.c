@@ -7,6 +7,16 @@
 
 static const char *TAG = "SDM_AS7341";
 
+/*
+    Integration time = (ATIME + 1) * (ASTEP + 1) * 2.78 us
+    ADC scale = (ATIME + 1) * (ASTEP + 1)
+    Wait time = (WTIME + 1) * 2.78 ms
+*/
+#define SDM_AS7341_ATIME            16
+#define SDM_AS7341_ASTEP            16
+#define SDM_AS7341_WTIME            0
+#define SDM_AS7341_GAIN             AS7341_GAIN_64X
+
 #define ACK_CHECK_EN                0x1              /*!< I2C master will check ack from slave */
 #define ACK_CHECK_DIS               0x0              /*!< I2C master will not check ack from slave */
 #define ACK_VAL                     0x0              /*!< I2C ack value */
