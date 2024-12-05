@@ -43,7 +43,7 @@ static const char *TAG =                    "SDM";
 // PWM for LED brightness control
 #define LEDC_PWM_OUTPUT_IO                  GPIO_NUM_1
 #define LEDC_PWM_CHANNEL                    LEDC_CHANNEL_1
-#define LEDC_PWM_DUTY                       2               // ((2 ** 8) - 1) * 1% = 2
+#define LEDC_PWM_DUTY                       1               // ((2 ** 8) - 1) * 1% = 2
 
 // I2C config
 #define I2C_MASTER_SCL_IO                   GPIO_NUM_18
@@ -158,7 +158,7 @@ typedef struct {
 
 static prepare_type_env_t prepare_write_env;
 
-void write_prepare_handler(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
+static void write_prepare_handler(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
 
 sdm_as7341_t                                as7341_sensor;
 uint16_t                                    notify_buffer[BUFFER_SIZE][CHANNEL_COUNT];

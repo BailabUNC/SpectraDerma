@@ -2,6 +2,7 @@ import sys
 import logging
 import asyncio
 from collections import deque
+from datetime import datetime
 
 from bleak import BleakScanner, BleakClient
 from PyQt5 import QtWidgets, QtCore
@@ -9,9 +10,18 @@ from pyqtgraph import PlotWidget, mkPen
 import pyqtgraph as pg
 from qasync import QEventLoop, asyncSlot
 
+#SQLite3 imports
+from datastore.SQLiteDatabase import SQLiteDatabase
+from datastore.DBHandler import DBHandler
 logger = logging.getLogger(__name__)
 
 class BTVizApp(QtWidgets.QMainWindow):
+
+    # SQLite3 Database instaniation
+    # REPLACE DB WITH REAL DB LOCATIONs
+    
+    
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle('BTViz')
@@ -23,6 +33,13 @@ class BTVizApp(QtWidgets.QMainWindow):
         self.curves = []
         self.timestamps = []
         self.init_ui()
+        
+        # get current time when the app is initated:
+        current_time = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+
+        #db handler!!!
+        self.db: SQLiteDatabase = SQLiteDatabase(f"{current_time}.db")
+        self.dbHandler: DBHandler = DBHandler(database=self.db)
 
     def init_ui(self):
         # Create input dialog to get BLE device name
@@ -94,14 +111,21 @@ class BTVizApp(QtWidgets.QMainWindow):
         """
         Handle incoming data from the BLE device.
         """
-        # Decode and parse the data
+
+        # print(data)
+        # DB Handler
+        try: 
+            self.dbHandler.notification_handler(sender=sender, data=data)
+        except Exception as e:
+            raise Exception(f"There was an error in inserting the Data into the database: {str(e)}") from e
+
         try:
             text = data.decode('utf-8').strip()
             values = [float(v) for v in text.split(',')]
         except Exception as e:
             print(f"Failed to parse data: {e}")
             return
-
+        
         if not self.plots:
             # Initialize plots based on number of channels
             num_channels = len(values)
