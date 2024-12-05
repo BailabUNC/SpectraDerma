@@ -43,7 +43,7 @@ static const char *TAG =                    "SDM";
 // PWM for LED brightness control
 #define LEDC_PWM_OUTPUT_IO                  GPIO_NUM_1
 #define LEDC_PWM_CHANNEL                    LEDC_CHANNEL_1
-#define LEDC_PWM_DUTY                       2               // ((2 ** 8) - 1) * 1% = 2
+#define LEDC_PWM_DUTY                       1               // ((2 ** 8) - 1) * 1% = 2
 
 // I2C config
 #define I2C_MASTER_SCL_IO                   GPIO_NUM_18
