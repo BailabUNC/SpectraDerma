@@ -15,3 +15,6 @@ dbs
 BTViz/build/
 BTViz/dist/
 BTViz/app.spec
+
+# what is this?
+.DS_Store
