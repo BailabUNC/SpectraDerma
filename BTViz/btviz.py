@@ -1,3 +1,4 @@
+
 import sys
 import logging
 import asyncio
@@ -13,15 +14,13 @@ from qasync import QEventLoop, asyncSlot
 #SQLite3 imports
 from datastore.SQLiteDatabase import SQLiteDatabase
 from datastore.DBHandler import DBHandler
+
 logger = logging.getLogger(__name__)
 
+MAX_RETRIES = 5  # number of reconn retries before give up 
+
 class BTVizApp(QtWidgets.QMainWindow):
-
-    # SQLite3 Database instaniation
-    # REPLACE DB WITH REAL DB LOCATIONs
     
-    
-
     def __init__(self):
         super().__init__()
         self.setWindowTitle('BTViz')
@@ -32,14 +31,13 @@ class BTVizApp(QtWidgets.QMainWindow):
         self.plots = []
         self.curves = []
         self.timestamps = []
+        self.connected = False
         self.init_ui()
         
         # get current time when the app is initated:
         current_time = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
-
-        #db handler!!!
-        self.db: SQLiteDatabase = SQLiteDatabase(f"{current_time}.db")
-        self.dbHandler: DBHandler = DBHandler(database=self.db)
+        self.db = SQLiteDatabase(f"{current_time}.db")
+        self.dbHandler = DBHandler(database=self.db)
 
     def init_ui(self):
         # Create input dialog to get BLE device name
@@ -64,56 +62,62 @@ class BTVizApp(QtWidgets.QMainWindow):
 
     @asyncSlot()
     async def start_ble(self):
-        # Scan for devices
-        devices = await BleakScanner.discover()
-        target_device = None
-        for d in devices:
-            if d.name == self.device_name:
-                target_device = d
-                break
+        num_retry = 0
 
-        if not target_device:
-            QtWidgets.QMessageBox.critical(
-                self, 'Error', f'Device {self.device_name} not found.')
-            sys.exit(1)
+        while num_retry < MAX_RETRIES and not self.connected:
+            try:
+                self.status_label.setText(f'Scanning for {self.device_name}... (Attempt {num_retry + 1} / {MAX_RETRIES})')
+                devices = await BleakScanner.discover()
+                target_device = next((d for d in devices if d.name == self.device_name), None)
 
-        self.status_label.setText(f'Connecting to {self.device_name}...')
+                if not target_device:
+                    raise Exception(f'Device {self.device_name} not found.')
 
-        # Connect to device
+                self.status_label.setText(f'Connecting to {self.device_name}')
+                self.client = BleakClient(target_device, winrt=dict(use_cached_service=False))
+
+                # Attempt connection
+                await self.client.connect()
+                self.connected = True
+                logger.info('Connect to device.')
+
+                # Setup notifications
+                await self.setup_notifications()
+                self.status_label.setText('Connected and receiving data.')
+                await self.client.start_notify(self.characteristic_uuid, self.notification_handler)
+
+                # Monitor connection
+                while self.client.is_connected:
+                    await asyncio.sleep(1)  # keep the task alive while connected
+                logger.warning('Connection lost. Reconnecting...')
+                self.connected = False
+
+            except Exception as e:
+                num_retry += 1
+                logger.error(f'Connection failed: {e}')
+                self.status_label.setText(f'Connection failed: {e}. Retrying...')
+                await asyncio.sleep(2)
+
+        if not self.connected:
+            QtWidgets.QMessageBox.critical(self, 'Error', 'Failed to connect after multiple attempts.')
+
+    async def setup_notifications(self):
         try:
-            self.client = BleakClient(target_device, winrt=dict(use_cached_services=False))
-            await self.client.connect()
-
             services = self.client.services
-            # Assuming only one custom service and characteristic
             for service in services:
                 for char in service.characteristics:
-                    if 'notify' in char.properties or 'indicate' in char.properties:
+                    if 'notify' in char.properties:
                         self.characteristic_uuid = char.uuid
-                        break
-
-            if not self.characteristic_uuid:
-                QtWidgets.QMessageBox.critical(
-                    self, 'Error', 'No notifiable characteristic found.')
-                sys.exit(1)
-
-            self.status_label.setText('Connected. Starting notifications...')
-            await asyncio.sleep(1.0)
-            await self.client.start_notify(self.characteristic_uuid, self.notification_handler)
-
+                        return
+            raise Exception('No notifiable characteristic found.')
         except Exception as e:
-            QtWidgets.QMessageBox.critical(
-                self, 'Error', f'Failed to connect: {e}')
-            print(e)
-            sys.exit(1)
+            logger.error(f'Failed to set up notifications: {e}')
+            raise
 
     def notification_handler(self, sender, data):
         """
         Handle incoming data from the BLE device.
         """
-
-        # print(data)
-        # DB Handler
         try: 
             self.dbHandler.notification_handler(sender=sender, data=data)
         except Exception as e:
