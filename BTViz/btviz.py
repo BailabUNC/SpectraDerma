@@ -2,6 +2,7 @@
 import sys
 import logging
 import asyncio
+import argparse
 from collections import deque
 from datetime import datetime
 
@@ -11,7 +12,6 @@ from pyqtgraph import PlotWidget, mkPen
 import pyqtgraph as pg
 from qasync import QEventLoop, asyncSlot
 
-#SQLite3 imports
 from datastore.SQLiteDatabase import SQLiteDatabase
 from datastore.DBHandler import DBHandler
 
@@ -21,7 +21,7 @@ MAX_RETRIES = 5  # number of reconn retries before give up
 
 class BTVizApp(QtWidgets.QMainWindow):
     
-    def __init__(self):
+    def __init__(self, no_recording: bool):
         super().__init__()
         self.setWindowTitle('BTViz')
         self.resize(800, 600)
@@ -35,12 +35,18 @@ class BTVizApp(QtWidgets.QMainWindow):
         self.curves = []
         self.timestamps = []
         self.connected = False
+        self.no_recording = no_recording
 
         # initialize UI and database
         self.init_ui()
-        current_time = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
-        self.db = SQLiteDatabase(f"{current_time}.db")
-        self.dbHandler = DBHandler(database=self.db)
+
+        if not self.no_recording:
+            current_time = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+            self.db = SQLiteDatabase(f"{current_time}.db")
+            self.dbHandler = DBHandler(database=self.db)
+        else:
+            self.db = None
+            self.dbHandler = None
 
     def init_ui(self):
         self.central_widget = QtWidgets.QWidget()
@@ -146,8 +152,9 @@ class BTVizApp(QtWidgets.QMainWindow):
         """
         Handle incoming data from the BLE device.
         """
-        try: 
-            self.dbHandler.notification_handler(sender=sender, data=data)
+        try:
+            if not self.no_recording:
+                self.dbHandler.notification_handler(sender=sender, data=data)
         except Exception as e:
             raise Exception(f"There was an error in inserting the Data into the database: {str(e)}") from e
 
@@ -183,13 +190,23 @@ class BTVizApp(QtWidgets.QMainWindow):
             self.curves[i].setData(list(self.timestamps[i]), list(self.data_buffer[i]))
 
 def main():
+    parser = argparse.ArgumentParser(description='BTViz - BLE Visulization Tool')
+    parser.add_argument(
+        '--no-recording',
+        action='store_true',
+        help='Disable data recording and database saving.'
+    )
+    args = parser.parse_args()
+
     app = QtWidgets.QApplication(sys.argv)
     loop = QEventLoop(app)
     asyncio.set_event_loop(loop)
-    window = BTVizApp()
+
+    window = BTVizApp(no_recording=args.no_recording)
     window.show()
     with loop:
         loop.run_forever()
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     main()
