@@ -24,6 +24,9 @@ class BTVizApp(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('BTViz')
+        self.resize(800, 600)
+
+        # BLE and UI states
         self.device_name = ''
         self.client = None
         self.characteristic_uuid = None
@@ -32,32 +35,57 @@ class BTVizApp(QtWidgets.QMainWindow):
         self.curves = []
         self.timestamps = []
         self.connected = False
+
+        # initialize UI and database
         self.init_ui()
-        
-        # get current time when the app is initated:
         current_time = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
         self.db = SQLiteDatabase(f"{current_time}.db")
         self.dbHandler = DBHandler(database=self.db)
 
     def init_ui(self):
-        # Create input dialog to get BLE device name
-        self.device_name, ok = QtWidgets.QInputDialog.getText(
-            self, 'Device Name Input', 'Enter BLE Device Name:', QtWidgets.QLineEdit.EchoMode.Normal, 'SpectraDerma')
-        if not ok or not self.device_name:
-            QtWidgets.QMessageBox.critical(
-                self, 'Error', 'No device name entered. Exiting.')
-            sys.exit(1)
-
-        # Set up central widget and layout
         self.central_widget = QtWidgets.QWidget()
         self.setCentralWidget(self.central_widget)
-        self.layout = QtWidgets.QVBoxLayout(self.central_widget)
+        self.layout_ = QtWidgets.QVBoxLayout(self.central_widget)
 
-        # Status label
-        self.status_label = QtWidgets.QLabel('Connecting to device...')
-        self.layout.addWidget(self.status_label)
+        # Top input section
+        self.top_layout = QtWidgets.QHBoxLayout()
+        self.layout_.addLayout(self.top_layout)
 
-        # Start BLE connection
+        # Device name input
+        self.device_name_input = QtWidgets.QLineEdit()
+        self.device_name_input.setPlaceholderText("Enter BLE Device Name")
+        self.device_name_input.setText("SpectraDerma")
+        self.top_layout.addWidget(QtWidgets.QLabel('Device Name:'))
+        self.top_layout.addWidget(self.device_name_input)
+
+        # Connect button
+        self.connect_button = QtWidgets.QPushButton('Connect')
+        self.connect_button.clicked.connect(self.on_connect_button_clicked)
+        self.top_layout.addWidget(self.connect_button)
+
+        # Status Label
+        self.status_label = QtWidgets.QLabel('Not Connected')
+        self.layout_.addWidget(self.status_label)
+
+        # Visualization Area (Disabled initially)
+        self.plot_area = QtWidgets.QWidget()
+        self.plot_layout = QtWidgets.QVBoxLayout(self.plot_area)
+        self.layout_.addWidget(self.plot_area)
+        self.plot_area.setEnabled(False)  # Disable until connected
+
+    def on_connect_button_clicked(self):
+        """
+        Handle the connect button click event
+        """
+        self.device_name = self.device_name_input.text().strip()
+        if not self.device_name:
+            QtWidgets.QMessageBox.warning(self, 'Input Error', 'Please enter a BLE device name.')
+            return
+        
+        # Disable input during connection
+        self.connect_button.setEnabled(False)
+        self.device_name_input.setEnabled(False)
+        self.status_label.setText('Connecting...')
         asyncio.ensure_future(self.start_ble())
 
     @asyncSlot()
