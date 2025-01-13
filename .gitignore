@@ -11,6 +11,9 @@ dbs
 *.db
 .idea
 
+# raw data
+raw_data/
+
 # python build
 BTViz/build/
 BTViz/dist/
