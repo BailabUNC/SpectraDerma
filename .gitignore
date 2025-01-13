@@ -16,5 +16,9 @@ BTViz/build/
 BTViz/dist/
 BTViz/app.spec
 
+# installer
+*.iss
+*.wxs
+
 # what is this?
 .DS_Store
