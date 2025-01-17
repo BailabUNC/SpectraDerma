@@ -87,6 +87,8 @@ static uint8_t adv_service_uuid128[32] = {
 static bool is_ready_for_notif =            false;
 static bool is_connected =                  false;
 
+// adv_data = advertising data (data that is being sent out)
+
 static esp_ble_adv_data_t adv_data = {
     .set_scan_rsp = false,
     .include_name = true,
@@ -477,7 +479,6 @@ static void sdm_sensor_task(void *arg)
                 // Only increase buffer_index after F5F8 data is filled
                 buffer_index++;
             }
-
             // If buffer is full, signal BLE task
             if (buffer_index >= BUFFER_SIZE)
             {
