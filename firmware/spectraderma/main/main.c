@@ -158,7 +158,7 @@ typedef struct {
 
 static prepare_type_env_t prepare_write_env;
 
-void write_prepare_handler(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
+static void write_prepare_handler(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
 
 sdm_as7341_t                                as7341_sensor;
 uint16_t                                    notify_buffer[BUFFER_SIZE][CHANNEL_COUNT];
