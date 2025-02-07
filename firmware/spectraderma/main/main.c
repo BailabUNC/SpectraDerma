@@ -24,7 +24,6 @@
 
 #include "sdm_as7341.h"
 
-
 static const char *TAG =                    "SDM";
 
 #define GPIO_LED_CTRL                       GPIO_NUM_0
@@ -87,11 +86,12 @@ static uint8_t adv_service_uuid128[32] = {
 static bool is_ready_for_notif =            false;
 static bool is_connected =                  false;
 
+// ADV = advertisement (before setting up the connection, an advertisement is sent out by the client to find the server)
 static esp_ble_adv_data_t adv_data = {
     .set_scan_rsp = false,
     .include_name = true,
     .include_txpower = false,
-    .min_interval = 0x0006, //slave connection min interval, Time = min_interval * 1.25 msec
+    .min_interval = 0x0006, //[interval between two advertisements] slave connection min interval, Time = min_interval * 1.25 msec
     .max_interval = 0x0010, //slave connection max interval, Time = max_interval * 1.25 msec
     .appearance = 0x00,
     .manufacturer_len = 0, //TEST_MANUFACTURER_DATA_LEN,

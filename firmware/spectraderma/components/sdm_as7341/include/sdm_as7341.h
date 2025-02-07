@@ -78,16 +78,6 @@
 #define AS7341_FDATA_L          0xFE        ///< AS7341_FDATA_L (unused)
 #define AS7341_FDATA_H          0xFF        ///< AS7341_FDATA_H (unused)
 
-/*
-    Integration time = (ATIME + 1) * (ASTEP + 1) * 2.78 us
-    ADC scale = (ATIME + 1) * (ASTEP + 1)
-    Wait time = (WTIME + 1) * 2.78 ms
-*/
-#define SDM_AS7341_ATIME        16
-#define SDM_AS7341_ASTEP        16
-#define SDM_AS7341_WTIME        0
-#define SDM_AS7341_GAIN         AS7341_GAIN_256X
-
 #define AS7341_SPECTRAL_INT_HIGH_MSK    0b00100000  ///< bitmask to check for a high threshold interrupt
 #define AS7341_SPECTRAL_INT_LOW_MSK     0b00010000  ///< bitmask to check for a low threshold interrupt
 

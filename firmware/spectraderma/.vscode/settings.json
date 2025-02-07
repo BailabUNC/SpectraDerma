@@ -11,7 +11,7 @@
     "idf.openOcdConfigs": [
         "board/esp32c3-builtin.cfg"
     ],
-    "idf.portWin": "COM26",
+    "idf.portWin": "COM3",
     "idf.pythonBinPathWin": "C:\\Users\\y1hli\\.espressif\\python_env\\idf5.2_py3.11_env\\Scripts\\python.exe",
     "idf.toolsPathWin": "C:\\Users\\y1hli\\.espressif",
     "idf.flashType": "UART",
@@ -25,7 +25,8 @@
         "i2c.h": "c",
         "i2c_master.h": "c",
         "i2c_types.h": "c",
-        "esp_gatt_defs.h": "c"
+        "esp_gatt_defs.h": "c",
+        "esp_mac.h": "c"
     },
     "idf.gitPathWin": "C:\\Users\\y1hli\\.espressif\\tools\\idf-git\\2.39.2\\cmd\\git.exe"
 }
