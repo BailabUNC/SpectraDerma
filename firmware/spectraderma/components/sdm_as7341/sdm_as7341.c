@@ -31,8 +31,10 @@ esp_err_t sdm_as7341_init(sdm_as7341_t *dev, i2c_port_t port, uint8_t addr, sdm_
     }
 
     dev->i2c_port = port;
+    // THIS ADDR is used by i2c protocol 
     dev->i2c_addr = addr;
 
+    // this guarentees that you are connecting to a AS7341
     uint8_t whoami;
     esp_err_t ret = sdm_as7341_read_reg(dev, AS7341_WHOAMI, &whoami);
     if (ret != ESP_OK)
@@ -64,12 +66,19 @@ esp_err_t sdm_as7341_init(sdm_as7341_t *dev, i2c_port_t port, uint8_t addr, sdm_
     return ESP_OK;
 }
 
+// write a specific value to the register location
+// sdm_as7341 is a pointer to the device
+// reg == address of the register 
+// data_wr == data that is to be written
+
 esp_err_t sdm_as7341_write_reg(sdm_as7341_t *dev, uint8_t reg, uint8_t data_wr)
 {
     if (dev == NULL)
     {
         return ESP_ERR_INVALID_ARG;
     }
+
+    // each i2c command has 3 parts. address of slave, addy of register in that slave, actual data that is to be written 
 
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     i2c_master_start(cmd);
@@ -91,6 +100,8 @@ esp_err_t sdm_as7341_write_reg(sdm_as7341_t *dev, uint8_t reg, uint8_t data_wr)
 
     return ret;
 }
+
+// data_rd is a pointer so that we can input a variable that will store the data
 
 esp_err_t sdm_as7341_read_reg(sdm_as7341_t *dev, uint8_t reg, uint8_t *data_rd)
 {
@@ -121,6 +132,9 @@ esp_err_t sdm_as7341_read_reg(sdm_as7341_t *dev, uint8_t reg, uint8_t *data_rd)
 
     return ret;
 }
+
+// everything that ends with reg means the CONTENT of the register, not the addy
+// addy is defined by the capital constants 
 
 esp_err_t sdm_as7341_enable(sdm_as7341_t *dev, bool enable)
 {
@@ -263,9 +277,11 @@ esp_err_t sdm_as7341_set_reg_bank(sdm_as7341_t *dev, sdm_as7341_reg_bank_t bank)
     {
         ESP_LOGE(TAG, "Failed to write to cfg0.");
     }
-
     return ret;
 }
+
+// integration mode changes the synchronization mode, aka when to start
+// and stop the package of bits and bytes
 
 esp_err_t sdm_as7341_set_integration_mode(sdm_as7341_t *dev, sdm_as7341_int_mode_t mode)
 {
@@ -312,6 +328,7 @@ esp_err_t sdm_as7341_set_integration_mode(sdm_as7341_t *dev, sdm_as7341_int_mode
     return ret;
 }
 
+// integration time sets the Atime and aSTEP constants 
 esp_err_t sdm_as7341_set_integration_time(sdm_as7341_t *dev, uint8_t atime, uint16_t astep)
 {
     esp_err_t ret;
@@ -539,6 +556,5 @@ esp_err_t sdm_as7341_read_channel_data(sdm_as7341_t *dev, uint16_t *data)
 
         data[i] = ((uint16_t)data_high << 8) | data_low;
     }
-
     return ESP_OK;
 }

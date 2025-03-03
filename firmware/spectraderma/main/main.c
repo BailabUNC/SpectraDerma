@@ -24,7 +24,6 @@
 
 #include "sdm_as7341.h"
 
-
 static const char *TAG =                    "SDM";
 
 #define GPIO_LED_CTRL                       GPIO_NUM_0
@@ -43,7 +42,7 @@ static const char *TAG =                    "SDM";
 // PWM for LED brightness control
 #define LEDC_PWM_OUTPUT_IO                  GPIO_NUM_1
 #define LEDC_PWM_CHANNEL                    LEDC_CHANNEL_1
-#define LEDC_PWM_DUTY                       1               // ((2 ** 8) - 1) * 1% = 2
+#define LEDC_PWM_DUTY                       2               // ((2 ** 8) - 1) * 1% = 2
 
 // I2C config
 #define I2C_MASTER_SCL_IO                   GPIO_NUM_18
@@ -87,11 +86,12 @@ static uint8_t adv_service_uuid128[32] = {
 static bool is_ready_for_notif =            false;
 static bool is_connected =                  false;
 
+// ADV = advertisement (before setting up the connection, an advertisement is sent out by the client to find the server)
 static esp_ble_adv_data_t adv_data = {
     .set_scan_rsp = false,
     .include_name = true,
     .include_txpower = false,
-    .min_interval = 0x0006, //slave connection min interval, Time = min_interval * 1.25 msec
+    .min_interval = 0x0006, //[interval between two advertisements] slave connection min interval, Time = min_interval * 1.25 msec
     .max_interval = 0x0010, //slave connection max interval, Time = max_interval * 1.25 msec
     .appearance = 0x00,
     .manufacturer_len = 0, //TEST_MANUFACTURER_DATA_LEN,
@@ -637,8 +637,8 @@ static void sdm_wire_init()
         .mode = I2C_MODE_MASTER,
         .sda_io_num = I2C_MASTER_SDA_IO,
         .scl_io_num = I2C_MASTER_SCL_IO,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .sda_pullup_en = GPIO_PULLUP_DISABLE,
+        .scl_pullup_en = GPIO_PULLUP_DISABLE,
         .master = {
             .clk_speed = I2C_MASTER_FREQ_HZ,
         },

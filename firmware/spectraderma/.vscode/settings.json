@@ -25,7 +25,8 @@
         "i2c.h": "c",
         "i2c_master.h": "c",
         "i2c_types.h": "c",
-        "esp_gatt_defs.h": "c"
+        "esp_gatt_defs.h": "c",
+        "esp_mac.h": "c"
     },
     "idf.gitPathWin": "C:\\Users\\y1hli\\.espressif\\tools\\idf-git\\2.39.2\\cmd\\git.exe"
 }
