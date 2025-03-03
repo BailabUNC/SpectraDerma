@@ -23,10 +23,7 @@ static const char *TAG = "SDM_AS7341";
 #define NACK_VAL                    0x1              /*!< I2C nack value */
 
 // Initialize the AS7341 sensor
-// dev == the device
-// port = i2c port on the ESP chip 
-// addr = addr of the slave / sensor chip. 
-esp_err_t sdm_as7341_init(sdm_as7341_t *dev, i2c_port_t port, uint8_t addr)
+esp_err_t sdm_as7341_init(sdm_as7341_t *dev, i2c_port_t port, uint8_t addr, sdm_as7341_int_mode_t int_mode)
 {
     if (dev == NULL)
     {
@@ -52,9 +49,10 @@ esp_err_t sdm_as7341_init(sdm_as7341_t *dev, i2c_port_t port, uint8_t addr)
     }
     ESP_LOGI(TAG, "AS7341 found: WHOAMI: 0x%02X", whoami);
 
-    // set to syns mode 
-    sdm_as7341_set_integration_mode(dev, AS7341_INT_MODE_SYNS);
-    sdm_as7341_set_gpio_state(dev, AS7341_GPIO_INPUT);
+    // set integration mode 
+    sdm_as7341_set_integration_mode(dev, int_mode);
+    dev->int_mode = int_mode;
+    sdm_as7341_set_gpio_state(dev, AS7341_GPIO_INPUT);  // NOTE: hardcoded for now
 
     sdm_as7341_set_integration_time(dev, SDM_AS7341_ATIME, SDM_AS7341_ASTEP);
     sdm_as7341_set_gain(dev, SDM_AS7341_GAIN);
@@ -290,6 +288,8 @@ esp_err_t sdm_as7341_set_integration_mode(sdm_as7341_t *dev, sdm_as7341_int_mode
     esp_err_t ret;
     uint8_t config_reg;
 
+    sdm_as7341_set_reg_bank(dev, AS7341_REG_BANK_L);
+
     // Read the current value of AS7341_CONFIG register
     sdm_as7341_read_reg(dev, AS7341_CONFIG, &config_reg);
 
@@ -322,6 +322,8 @@ esp_err_t sdm_as7341_set_integration_mode(sdm_as7341_t *dev, sdm_as7341_int_mode
     {
         ESP_LOGE(TAG, "Failed to set AS7341 mode");
     }
+
+    sdm_as7341_set_reg_bank(dev, AS7341_REG_BANK_H);
 
     return ret;
 }
@@ -389,30 +391,6 @@ esp_err_t sdm_as7341_set_gpio_state(sdm_as7341_t *dev, sdm_as7341_gpio_mode_t gp
             return ESP_ERR_INVALID_ARG;
     }
     ret = sdm_as7341_write_reg(dev, AS7341_GPIO2, gpio2_reg);
-    if (ret != ESP_OK) return ret;
-
-    return ESP_OK;
-}
-
-esp_err_t sdm_as7341_start_measure(sdm_as7341_t *dev, sdm_channel_mapping_mode_t mode)
-{
-    esp_err_t ret;
-
-    // Disable SMUX to apply configuration
-    ret = sdm_as7341_enable_smux(dev, false);
-    if (ret != ESP_OK) return ret;
-
-    // Load SMUX configuration
-    ret = sdm_as7341_write_reg(dev, AS7341_CFG6, 0x10);
-    if (ret != ESP_OK) return ret;
-    // Configure SMUX
-    if (mode == AS7341_CH_F1F4_CLEAR_NIR) ret = sdm_as7341_setup_f1f4_clear_nir(dev);
-    else if (mode == AS7341_CH_F5F8_CLEAR_NIR) ret = sdm_as7341_setup_f5f8_clear_nir(dev);
-    else return ESP_ERR_INVALID_ARG;
-    if (ret != ESP_OK) return ret;
-
-    // Enable spectral measurement
-    ret = sdm_as7341_enable_spectral_measurement(dev, true);
     if (ret != ESP_OK) return ret;
 
     return ESP_OK;
@@ -519,6 +497,38 @@ esp_err_t sdm_as7341_setup_f5f8_clear_nir(sdm_as7341_t *dev)
     }
 
     return ret;
+}
+
+esp_err_t sdm_as7341_start_measure(sdm_as7341_t *dev, sdm_channel_mapping_mode_t mode)
+{
+    esp_err_t ret;
+
+    // Set to high register bank
+    sdm_as7341_set_reg_bank(dev, AS7341_REG_BANK_H);
+
+    // Disable SMUX to apply configuration
+    ret = sdm_as7341_enable_smux(dev, false);
+    if (ret != ESP_OK) return ret;
+
+    // Write SMUX configuration to CFG6
+    ret = sdm_as7341_write_reg(dev, AS7341_CFG6, 0x10);
+    if (ret != ESP_OK) return ret;
+
+    // Configure SMUX
+    if (mode == AS7341_CH_F1F4_CLEAR_NIR) ret = sdm_as7341_setup_f1f4_clear_nir(dev);
+    else if (mode == AS7341_CH_F5F8_CLEAR_NIR) ret = sdm_as7341_setup_f5f8_clear_nir(dev);
+    else return ESP_ERR_INVALID_ARG;
+    if (ret != ESP_OK) return ret;
+
+    // Enable SMUX
+    ret = sdm_as7341_enable_smux(dev, true);
+    if (ret != ESP_OK) return ret;
+
+    // Enable spectral measurement
+    ret = sdm_as7341_enable_spectral_measurement(dev, true);
+    if (ret != ESP_OK) return ret;
+
+    return ESP_OK;
 }
 
 esp_err_t sdm_as7341_read_channel_data(sdm_as7341_t *dev, uint16_t *data)

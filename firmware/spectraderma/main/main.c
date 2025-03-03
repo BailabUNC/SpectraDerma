@@ -646,7 +646,7 @@ static void sdm_wire_init()
     i2c_param_config(I2C_MASTER_NUM, &i2c_config);
     i2c_driver_install(I2C_MASTER_NUM, i2c_config.mode, 0, 0, 0);
 
-    esp_err_t ret = sdm_as7341_init(&as7341_sensor, I2C_MASTER_NUM, AS7341_I2CADDR_DEFAULT);
+    esp_err_t ret = sdm_as7341_init(&as7341_sensor, I2C_MASTER_NUM, AS7341_I2CADDR_DEFAULT, AS7341_INT_MODE_SYNS);
     if (ret == ESP_OK)
     {
         ESP_LOGI(TAG, "AS7341 initialized.");

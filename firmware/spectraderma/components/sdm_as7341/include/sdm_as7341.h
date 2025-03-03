@@ -207,11 +207,12 @@ typedef enum {
 } sdm_as7341_gpio_mode_t;
 
 typedef struct {
-    i2c_port_t i2c_port;
-    uint8_t i2c_addr;
+    i2c_port_t              i2c_port;
+    uint8_t                 i2c_addr;
+    sdm_as7341_int_mode_t   int_mode;
 } sdm_as7341_t;
 
-esp_err_t sdm_as7341_init(sdm_as7341_t *dev, i2c_port_t port, uint8_t addr);
+esp_err_t sdm_as7341_init(sdm_as7341_t *dev, i2c_port_t port, uint8_t addr, sdm_as7341_int_mode_t int_mode);
 esp_err_t sdm_as7341_write_reg(sdm_as7341_t *dev, uint8_t reg, uint8_t data_wr);
 esp_err_t sdm_as7341_read_reg(sdm_as7341_t *dev, uint8_t reg, uint8_t *data_wr);
 
