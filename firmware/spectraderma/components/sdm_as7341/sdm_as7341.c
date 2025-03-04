@@ -12,10 +12,10 @@ static const char *TAG = "SDM_AS7341";
     ADC scale = (ATIME + 1) * (ASTEP + 1)
     Wait time = (WTIME + 1) * 2.78 ms
 */
-#define SDM_AS7341_ATIME            16
-#define SDM_AS7341_ASTEP            16
+#define SDM_AS7341_ATIME            59
+#define SDM_AS7341_ASTEP            59
 #define SDM_AS7341_WTIME            0
-#define SDM_AS7341_GAIN             AS7341_GAIN_64X
+#define SDM_AS7341_GAIN             AS7341_GAIN_256X
 
 #define ACK_CHECK_EN                0x1              /*!< I2C master will check ack from slave */
 #define ACK_CHECK_DIS               0x0              /*!< I2C master will not check ack from slave */
@@ -506,6 +506,10 @@ esp_err_t sdm_as7341_start_measure(sdm_as7341_t *dev, sdm_channel_mapping_mode_t
     // Set to high register bank
     sdm_as7341_set_reg_bank(dev, AS7341_REG_BANK_H);
 
+    // Disable spectral measurement
+    ret = sdm_as7341_enable_spectral_measurement(dev, false);
+    if (ret != ESP_OK) return ret;
+
     // Disable SMUX to apply configuration
     ret = sdm_as7341_enable_smux(dev, false);
     if (ret != ESP_OK) return ret;
@@ -514,11 +518,15 @@ esp_err_t sdm_as7341_start_measure(sdm_as7341_t *dev, sdm_channel_mapping_mode_t
     ret = sdm_as7341_write_reg(dev, AS7341_CFG6, 0x10);
     if (ret != ESP_OK) return ret;
 
+    sdm_as7341_set_reg_bank(dev, AS7341_REG_BANK_L);
+
     // Configure SMUX
     if (mode == AS7341_CH_F1F4_CLEAR_NIR) ret = sdm_as7341_setup_f1f4_clear_nir(dev);
     else if (mode == AS7341_CH_F5F8_CLEAR_NIR) ret = sdm_as7341_setup_f5f8_clear_nir(dev);
     else return ESP_ERR_INVALID_ARG;
     if (ret != ESP_OK) return ret;
+
+    sdm_as7341_set_reg_bank(dev, AS7341_REG_BANK_H);
 
     // Enable SMUX
     ret = sdm_as7341_enable_smux(dev, true);
