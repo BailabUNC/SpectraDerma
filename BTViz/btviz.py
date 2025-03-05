@@ -92,7 +92,7 @@ class BTVizApp(QtWidgets.QMainWindow):
         self.connect_button.setEnabled(False)
         self.device_name_input.setEnabled(False)
         self.status_label.setText('Connecting...')
-        asyncio.ensure_future(self.start_ble())
+        asyncio.create_task(self.start_ble())
 
     @asyncSlot()
     async def start_ble(self):
@@ -175,7 +175,7 @@ class BTVizApp(QtWidgets.QMainWindow):
                 plot_widget.setTitle(f"Channel {i+1}")
                 pen = mkPen(color=pg.intColor(i))
                 curve = plot_widget.plot(pen=pen)
-                self.layout.addWidget(plot_widget)
+                self.layout_.addWidget(plot_widget)
                 self.plots.append(plot_widget)
                 self.curves.append(curve)
 
