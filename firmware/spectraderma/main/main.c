@@ -456,6 +456,9 @@ static void sdm_sensor_task(void *arg)
 
         if (ret == ESP_OK)
         {
+            // Wait for integration to complete
+            vTaskDelay(pdMS_TO_TICKS(20));
+
             sdm_as7341_read_channel_data(&as7341_sensor, reading_buffer);
 
             if (use_f1f4_clear_nir_mode)

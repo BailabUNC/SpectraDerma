@@ -28,5 +28,19 @@
         "esp_gatt_defs.h": "c",
         "esp_mac.h": "c"
     },
-    "idf.gitPathWin": "C:\\Users\\y1hli\\.espressif\\tools\\idf-git\\2.39.2\\cmd\\git.exe"
+    "idf.gitPathWin": "C:\\Users\\y1hli\\.espressif\\tools\\idf-git\\2.39.2\\cmd\\git.exe",
+
+    "background.fullscreen": {
+        // Local images can be dragged into the browser to quickly get the file protocol address from the address bar
+        "images": ["file:///C:/Users/y1hli/OneDrive%20-%20University%20of%20North%20Carolina%20at%20Chapel%20Hill/documents/wallpaper/Konachan.com%20-%20205926%20animal%20bird%20building%20city%20hatsune_miku%20long_hair%20scenic%20sky%20spencer_sais%20thighhighs%20twintails%20vocaloid.png"],
+        "opacity": 0.15,
+        "size": "cover",
+        "position": "center",
+        "interval": 0,
+        "random": false
+    },
+    // `sidebar` and `panel` have the same config as `fullscreen`
+    "background.sidebar": {},
+    "background.panel": {}
+
 }
