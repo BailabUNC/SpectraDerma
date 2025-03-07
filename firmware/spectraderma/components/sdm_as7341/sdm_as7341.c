@@ -56,12 +56,28 @@ esp_err_t sdm_as7341_init(sdm_as7341_t *dev, i2c_port_t port, uint8_t addr, sdm_
 
     sdm_as7341_set_integration_time(dev, SDM_AS7341_ATIME, SDM_AS7341_ASTEP);
     sdm_as7341_set_gain(dev, SDM_AS7341_GAIN);
-
     sdm_as7341_set_wait_time(dev, SDM_AS7341_WTIME);
 
     // enable device
     sdm_as7341_enable(dev, true);
     vTaskDelay(15);  // auto zero
+
+    // setup smux
+    // disable spectral measurement and smux for now
+    ret = sdm_as7341_enable_spectral_measurement(dev, false);
+    if (ret != ESP_OK) return ret;
+    ret = sdm_as7341_enable_smux(dev, false);
+    if (ret != ESP_OK) return ret;
+
+    // configure smux
+    ret = sdm_as7341_smuxmap_setup_custom(dev);
+    if (ret != ESP_OK) return ret;
+
+    // re-enable spectral measurement and smux
+    ret = sdm_as7341_enable_smux(dev, true);
+    if (ret != ESP_OK) return ret;
+    ret = sdm_as7341_enable_spectral_measurement(dev, true);
+    if (ret != ESP_OK) return ret;
 
     return ESP_OK;
 }
@@ -396,7 +412,7 @@ esp_err_t sdm_as7341_set_gpio_state(sdm_as7341_t *dev, sdm_as7341_gpio_mode_t gp
     return ESP_OK;
 }
 
-esp_err_t sdm_as7341_setup_f1f4_clear_nir(sdm_as7341_t *dev)
+esp_err_t sdm_as7341_smuxmap_setup_f1f4_clear_nir(sdm_as7341_t *dev)
 {
     esp_err_t ret;
 
@@ -448,7 +464,7 @@ esp_err_t sdm_as7341_setup_f1f4_clear_nir(sdm_as7341_t *dev)
     return ret;
 }
 
-esp_err_t sdm_as7341_setup_f5f8_clear_nir(sdm_as7341_t *dev)
+esp_err_t sdm_as7341_smuxmap_setup_f5f8_clear_nir(sdm_as7341_t *dev)
 {
     esp_err_t ret;
 
@@ -499,38 +515,85 @@ esp_err_t sdm_as7341_setup_f5f8_clear_nir(sdm_as7341_t *dev)
     return ret;
 }
 
-esp_err_t sdm_as7341_start_measure(sdm_as7341_t *dev, sdm_channel_mapping_mode_t mode)
+// F1 -> ADC0, F3 -> ADC1, F5 -> ADC2, F6 -> ADC3, F8 -> ADC4, NIR -> ADC5
+esp_err_t sdm_as7341_smuxmap_setup_custom(sdm_as7341_t *dev)
 {
     esp_err_t ret;
 
-    // Set to high register bank
-    sdm_as7341_set_reg_bank(dev, AS7341_REG_BANK_H);
+    sdm_as7341_write_reg(dev, 0x00, 0x20);  // F3 left to ADC1
+    sdm_as7341_write_reg(dev, 0x01, 0x01);  // F1 left to ADC0
+    sdm_as7341_write_reg(dev, 0x02, 0x00);  // Reserved
+    sdm_as7341_write_reg(dev, 0x03, 0x50);  // F8 left to ADC4
+    sdm_as7341_write_reg(dev, 0x04, 0x04);  // F6 left to ADC3
+    sdm_as7341_write_reg(dev, 0x05, 0x00);  // F4 left (unused), F2 left (unused)
+    sdm_as7341_write_reg(dev, 0x06, 0x30);  // F5 left to ADC2
+    sdm_as7341_write_reg(dev, 0x07, 0x00);  // F7 left (unused)
+    sdm_as7341_write_reg(dev, 0x08, 0x00);  // Clear left (unused)
+    sdm_as7341_write_reg(dev, 0x09, 0x30);  // F5 right to ADC2
+    sdm_as7341_write_reg(dev, 0x0A, 0x00);  // F7 right (unused)
+    sdm_as7341_write_reg(dev, 0x0B, 0x00);  // Reserved
+    sdm_as7341_write_reg(dev, 0x0C, 0x00);  // F2 right (unused)
+    sdm_as7341_write_reg(dev, 0x0D, 0x00);  // F4 right (unused)
+    sdm_as7341_write_reg(dev, 0x0E, 0x45);  // F6 right to ADC3, F8 right to ADC4
+    sdm_as7341_write_reg(dev, 0x0F, 0x20);  // F3 right to ADC1
+    sdm_as7341_write_reg(dev, 0x10, 0x01);  // external GPIO input (unused), F1 right to ADC0
+    sdm_as7341_write_reg(dev, 0x11, 0x00);  // Clear right (unused), external INT input (unused)
+    sdm_as7341_write_reg(dev, 0x12, 0x00);  // Dark (unused)
+    sdm_as7341_write_reg(dev, 0x13, 0x06);  // Flicker (unused), NIR to ADC5
 
-    // Disable SMUX to apply configuration
-    ret = sdm_as7341_enable_smux(dev, false);
-    if (ret != ESP_OK) return ret;
+    // Read back and log registers 0x00 to 0x13 for verification.
+    uint8_t value;
+    for (uint8_t reg = 0x00; reg <= 0x13; reg++) {
+        ret = sdm_as7341_read_reg(dev, reg, &value);
+        if (ret != ESP_OK) return ret;
+        ESP_LOGI(TAG, "SMUX reg 0x%02X: 0x%02X", reg, value);
+    }
+    return ESP_OK;
+}
 
-    // Write SMUX configuration to CFG6
-    ret = sdm_as7341_write_reg(dev, AS7341_CFG6, 0x10);
-    if (ret != ESP_OK) return ret;
+esp_err_t sdm_as7341_start_measure(sdm_as7341_t *dev, sdm_channel_mapping_mode_t mode)
+{
+    // esp_err_t ret;
+    // int count = 0;
 
-    // Configure SMUX
-    if (mode == AS7341_CH_F1F4_CLEAR_NIR) ret = sdm_as7341_setup_f1f4_clear_nir(dev);
-    else if (mode == AS7341_CH_F5F8_CLEAR_NIR) ret = sdm_as7341_setup_f5f8_clear_nir(dev);
-    else return ESP_ERR_INVALID_ARG;
-    if (ret != ESP_OK) return ret;
+    // // Set to high register bank
+    // sdm_as7341_set_reg_bank(dev, AS7341_REG_BANK_H);
 
-    uint8_t smux_0;
-    sdm_as7341_read_reg(dev, 0x00, &smux_0);
-    ESP_LOGI(TAG, "Register at 0x00: 0x%02X", smux_0);
+    // // Disable SMUX to apply configuration
+    // ret = sdm_as7341_enable_spectral_measurement(dev, false);
+    // if (ret != ESP_OK) return ret;
+    // ret = sdm_as7341_enable_smux(dev, false);
+    // if (ret != ESP_OK) return ret;
 
-    // Enable SMUX
-    ret = sdm_as7341_enable_smux(dev, true);
-    if (ret != ESP_OK) return ret;
+    // // Write SMUX configuration to CFG6
+    // ret = sdm_as7341_write_reg(dev, AS7341_CFG6, 0x10);
+    // if (ret != ESP_OK) return ret;
 
-    // Enable spectral measurement
-    ret = sdm_as7341_enable_spectral_measurement(dev, true);
-    if (ret != ESP_OK) return ret;
+    // // Configure SMUX
+    // if (mode == AS7341_CH_F1F4_CLEAR_NIR) ret = sdm_as7341_smuxmap_setup_f1f4_clear_nir(dev);
+    // else if (mode == AS7341_CH_F5F8_CLEAR_NIR) ret = sdm_as7341_smuxmap_setup_f5f8_clear_nir(dev);
+    // else return ESP_ERR_INVALID_ARG;
+    // if (ret != ESP_OK) return ret;
+
+    // // Enable SMUX
+    // ret = sdm_as7341_enable_smux(dev, true);
+    // if (ret != ESP_OK) return ret;
+
+    // count = 0;
+    // do {
+    //     ret = sdm_as7341_read_reg(dev, AS7341_ENABLE, &probe_reg);
+    //     if (ret != ESP_OK) return ret;
+    //     vTaskDelay(pdMS_TO_TICKS(1));
+    //     count++;
+    //     if (count > 1000) {
+    //         ESP_LOGE(TAG, "SMUX command timeout");
+    //         return ESP_ERR_TIMEOUT;
+    //     }
+    // } while (probe_reg & (1 << 4));
+
+    // // Enable spectral measurement
+    // ret = sdm_as7341_enable_spectral_measurement(dev, true);
+    // if (ret != ESP_OK) return ret;
 
     return ESP_OK;
 }

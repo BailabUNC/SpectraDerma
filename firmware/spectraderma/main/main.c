@@ -53,7 +53,7 @@ static const char *TAG =                    "SDM";
 // Timer for measurement and BLE
 #define TIMER_ALARM_US                      10000
 #define BUFFER_SIZE                         1
-#define CHANNEL_COUNT                       12
+#define CHANNEL_COUNT                       6
 #define CHAR_SIZE                           (CHANNEL_COUNT * BUFFER_SIZE * 6 + 1)
 
 static bool use_f1f4_clear_nir_mode =       true;
@@ -461,25 +461,25 @@ static void sdm_sensor_task(void *arg)
 
             sdm_as7341_read_channel_data(&as7341_sensor, reading_buffer);
 
-            if (use_f1f4_clear_nir_mode)
-            {
+            // if (use_f1f4_clear_nir_mode)
+            // {
                 // Fill the first 6 channels when in F1F4 mode
                 for (int i = 0; i < 6; i++)
                 {
                     notify_buffer[buffer_index][i] = reading_buffer[i];
                 }
-            }
-            else
-            {
-                // Fill the last 6 channels (7th location onward) when in F5F8 mode
-                for (int i = 0; i < 6; i++)
-                {
-                    notify_buffer[buffer_index][i + 6] = reading_buffer[i];
-                }
+            // }
+            // else
+            // {
+            //     // Fill the last 6 channels (7th location onward) when in F5F8 mode
+            //     for (int i = 0; i < 6; i++)
+            //     {
+            //         notify_buffer[buffer_index][i + 6] = reading_buffer[i];
+            //     }
 
-                // Only increase buffer_index after F5F8 data is filled
+            //     // Only increase buffer_index after F5F8 data is filled
                 buffer_index++;
-            }
+            // }
 
             // If buffer is full, signal BLE task
             if (buffer_index >= BUFFER_SIZE)
@@ -493,7 +493,7 @@ static void sdm_sensor_task(void *arg)
             ESP_LOGE(TAG, "Failed to read sensor data");
         }
 
-        use_f1f4_clear_nir_mode = !use_f1f4_clear_nir_mode;
+        // use_f1f4_clear_nir_mode = !use_f1f4_clear_nir_mode;
 
         gpio_set_level(GPIO_LED_CTRL, 0);
         gpio_set_level(GPIO_NIR_CTRL, 0);
