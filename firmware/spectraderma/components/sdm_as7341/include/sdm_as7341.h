@@ -221,10 +221,23 @@ esp_err_t sdm_as7341_enable_spectral_measurement(sdm_as7341_t *dev, bool enable)
 esp_err_t sdm_as7341_enable_wait(sdm_as7341_t *dev, bool enable);
 esp_err_t sdm_as7341_enable_smux(sdm_as7341_t *dev, bool enable);
 
+/**
+ * @brief Enable System Interrupt.
+ * 
+ * When asserted permits system interrupts to be generated.
+ * Indicates that flicker detection status has changed or SMUX operation has finished. 
+ */
+esp_err_t sdm_as7341_enable_sien(sdm_as7341_t *dev, bool enable);
+
+/**
+ * @brief Enable System Interrupt SMUX Operation. 
+ * 
+ * Enables system interrupt when SMUX command has finished.
+ */
+esp_err_t sdm_as7341_enable_sien_smux(sdm_as7341_t *dev, bool enable);
+
 esp_err_t sdm_as7341_start_measure(sdm_as7341_t *dev, sdm_channel_mapping_mode_t mode);
 
-esp_err_t sdm_as7341_smuxmap_setup_f1f4_clear_nir(sdm_as7341_t *dev);
-esp_err_t sdm_as7341_smuxmap_setup_f5f8_clear_nir(sdm_as7341_t *dev);
 esp_err_t sdm_as7341_smuxmap_setup_custom(sdm_as7341_t *dev);
 
 esp_err_t sdm_as7341_set_integration_mode(sdm_as7341_t *dev, sdm_as7341_int_mode_t mode);

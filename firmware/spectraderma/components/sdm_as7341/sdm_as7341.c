@@ -25,6 +25,9 @@ static const char *TAG = "SDM_AS7341";
 // Initialize the AS7341 sensor
 esp_err_t sdm_as7341_init(sdm_as7341_t *dev, i2c_port_t port, uint8_t addr, sdm_as7341_int_mode_t int_mode)
 {
+    int count = 0;
+    uint8_t probe_reg;
+
     if (dev == NULL)
     {
         return ESP_ERR_INVALID_ARG;
@@ -48,7 +51,11 @@ esp_err_t sdm_as7341_init(sdm_as7341_t *dev, i2c_port_t port, uint8_t addr, sdm_
         return ESP_FAIL;
     }
     ESP_LOGI(TAG, "AS7341 found: WHOAMI: 0x%02X", whoami);
-
+    
+    // enable device
+    sdm_as7341_enable(dev, true);
+    vTaskDelay(15);  // auto zero
+    
     // set integration mode 
     sdm_as7341_set_integration_mode(dev, int_mode);
     dev->int_mode = int_mode;
@@ -58,24 +65,57 @@ esp_err_t sdm_as7341_init(sdm_as7341_t *dev, i2c_port_t port, uint8_t addr, sdm_
     sdm_as7341_set_gain(dev, SDM_AS7341_GAIN);
     sdm_as7341_set_wait_time(dev, SDM_AS7341_WTIME);
 
-    // enable device
-    sdm_as7341_enable(dev, true);
-    vTaskDelay(15);  // auto zero
-
     // setup smux
-    // disable spectral measurement and smux for now
+    // disable spectral measurement for now
     ret = sdm_as7341_enable_spectral_measurement(dev, false);
     if (ret != ESP_OK) return ret;
-    ret = sdm_as7341_enable_smux(dev, false);
+
+    // enable special interrupt (SINT_SMUX)
+    // As soon as SMUX command has finished interrupt is activated.
+    ret = sdm_as7341_enable_sien_smux(dev, true);
+    if (ret != ESP_OK) return ret;
+    
+    // enable special interrupt SIEN
+    ret = sdm_as7341_enable_sien(dev, true);
+    if (ret != ESP_OK) return ret;
+
+    // Write SMUX configuration to CFG6
+    ret = sdm_as7341_write_reg(dev, AS7341_CFG6, 0x10);
     if (ret != ESP_OK) return ret;
 
     // configure smux
     ret = sdm_as7341_smuxmap_setup_custom(dev);
     if (ret != ESP_OK) return ret;
-
-    // re-enable spectral measurement and smux
+    
+    // start smux command
     ret = sdm_as7341_enable_smux(dev, true);
     if (ret != ESP_OK) return ret;
+
+    // wait for system interrupt
+    do {
+        sdm_as7341_read_reg(dev, AS7341_STATUS5, &probe_reg);
+        ESP_LOGI(TAG, "Probing STATUS5 reg: 0x%02X", probe_reg);
+        vTaskDelay(pdMS_TO_TICKS(1));
+        count++;
+        if (count > 1000) {
+            ESP_LOGE(TAG, "System Interrupt for SMUX timeout");
+            return ESP_ERR_TIMEOUT;
+        }
+    } while (!(probe_reg & (1 << 2)));
+
+    // wait until smux command is sent
+    do {
+        sdm_as7341_read_reg(dev, AS7341_ENABLE, &probe_reg);
+        ESP_LOGI(TAG, "Probing ENABLE reg: 0x%02X", probe_reg);
+        vTaskDelay(pdMS_TO_TICKS(1));
+        count++;
+        if (count > 1000) {
+            ESP_LOGE(TAG, "SMUX command timeout");
+            return ESP_ERR_TIMEOUT;
+        }
+    } while (probe_reg & (1 << 4));
+
+    // re-enable spectral measurement
     ret = sdm_as7341_enable_spectral_measurement(dev, true);
     if (ret != ESP_OK) return ret;
 
@@ -264,6 +304,62 @@ esp_err_t sdm_as7341_enable_smux(sdm_as7341_t *dev, bool enable)
     return ret;
 }
 
+esp_err_t sdm_as7341_enable_sien(sdm_as7341_t *dev, bool enable)
+{
+    esp_err_t ret;
+    uint8_t intenab_reg;
+
+    // Read the current value of AS7341_INTENAB register
+    sdm_as7341_read_reg(dev, AS7341_INTENAB, &intenab_reg);
+
+    // Set or clear the system interrupt enable bit (bit 1)
+    if (enable)
+    {
+        intenab_reg |= (1 << 0);
+    }
+    else
+    {
+        intenab_reg &= ~(1 << 0);
+    }
+
+    // Write the modified register
+    ret = sdm_as7341_write_reg(dev, AS7341_INTENAB, intenab_reg);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to %s system interrupt", enable ? "enable" : "disable");
+    }
+
+    return ret;
+}
+
+esp_err_t sdm_as7341_enable_sien_smux(sdm_as7341_t *dev, bool enable)
+{
+    esp_err_t ret;
+    uint8_t cfg9_reg;
+
+    // Read the current value of AS7341_CFG9 register
+    sdm_as7341_read_reg(dev, AS7341_CFG9, &cfg9_reg);
+
+    // Set or clear the system interrupt for smux operation enable bit (bit 4)
+    if (enable)
+    {
+        cfg9_reg |= (1 << 4);
+    }
+    else
+    {
+        cfg9_reg &= ~(1 << 4);
+    }
+
+    // Write the modified register
+    ret = sdm_as7341_write_reg(dev, AS7341_CFG9, cfg9_reg);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to %s system interrupt", enable ? "enable" : "disable");
+    }
+
+    return ret;
+}
+
 esp_err_t sdm_as7341_set_reg_bank(sdm_as7341_t *dev, sdm_as7341_reg_bank_t bank)
 {
     esp_err_t ret;
@@ -410,109 +506,6 @@ esp_err_t sdm_as7341_set_gpio_state(sdm_as7341_t *dev, sdm_as7341_gpio_mode_t gp
     if (ret != ESP_OK) return ret;
 
     return ESP_OK;
-}
-
-esp_err_t sdm_as7341_smuxmap_setup_f1f4_clear_nir(sdm_as7341_t *dev)
-{
-    esp_err_t ret;
-
-    // SMUX configuration for F1-F4, Clear, NIR
-    // These values are based on the AS7341 datasheet
-    uint8_t smux_conf[] = {
-        0x00, 0x30,
-        0x01, 0x01,
-        0x02, 0x00,
-        0x03, 0x00,
-        0x04, 0x00,
-        0x05, 0x42,
-        0x06, 0x00,
-        0x07, 0x00,
-        0x08, 0x50,
-        0x09, 0x00,
-        0x0A, 0x00,
-        0x0B, 0x00,
-        0x0C, 0x20,
-        0x0D, 0x04,
-        0x0E, 0x00,
-        0x0F, 0x30,
-        0x10, 0x01,
-        0x11, 0x50,
-        0x12, 0x00,
-        0x13, 0x06
-    };
-
-    // Write SMUX configuration
-    for (int i = 0; i < sizeof(smux_conf) / 2; i++)
-    {
-        uint8_t reg = smux_conf[i * 2];
-        uint8_t value = smux_conf[i * 2 + 1];
-        ret = sdm_as7341_write_reg(dev, reg, value);
-        if (ret != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to write SMUX reg 0x%02X", reg);
-            return ret;
-        }
-    }
-
-    // Load SMUX configuration
-    ret = sdm_as7341_write_reg(dev, AS7341_CFG6, 0x01);
-    if (ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to load SMUX configuration");
-    }
-
-    return ret;
-}
-
-esp_err_t sdm_as7341_smuxmap_setup_f5f8_clear_nir(sdm_as7341_t *dev)
-{
-    esp_err_t ret;
-
-    // SMUX configuration for F5-F8, Clear, NIR
-    uint8_t smux_conf[] = {
-        0x00, 0x00,
-        0x01, 0x00,
-        0x02, 0x00,
-        0x03, 0x40,
-        0x04, 0x02,
-        0x05, 0x00,
-        0x06, 0x10,
-        0x07, 0x03,
-        0x08, 0x50,
-        0x09, 0x10,
-        0x0A, 0x03,
-        0x0B, 0x00,
-        0x0C, 0x00,
-        0x0D, 0x00,
-        0x0E, 0x24,
-        0x0F, 0x00,
-        0x10, 0x00,
-        0x11, 0x50,
-        0x12, 0x00,
-        0x13, 0x06
-    };
-
-    // Write SMUX configuration
-    for (int i = 0; i < sizeof(smux_conf) / 2; i++)
-    {
-        uint8_t reg = smux_conf[i * 2];
-        uint8_t value = smux_conf[i * 2 + 1];
-        ret = sdm_as7341_write_reg(dev, reg, value);
-        if (ret != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to write SMUX reg 0x%02X", reg);
-            return ret;
-        }
-    }
-
-    // Load SMUX configuration
-    ret = sdm_as7341_write_reg(dev, AS7341_CFG6, 0x01);
-    if (ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to load SMUX configuration");
-    }
-
-    return ret;
 }
 
 // F1 -> ADC0, F3 -> ADC1, F5 -> ADC2, F6 -> ADC3, F8 -> ADC4, NIR -> ADC5
