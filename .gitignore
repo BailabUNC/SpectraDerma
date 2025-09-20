@@ -13,6 +13,7 @@ dbs
 
 # raw data
 raw_data/
+data/
 
 # python build
 BTViz/build/
