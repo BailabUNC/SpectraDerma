@@ -11,10 +11,18 @@ dbs
 *.db
 .idea
 
+# raw data
+raw_data/
+data/
+
 # python build
 BTViz/build/
 BTViz/dist/
 BTViz/app.spec
+
+# installer
+*.iss
+*.wxs
 
 # what is this?
 .DS_Store
