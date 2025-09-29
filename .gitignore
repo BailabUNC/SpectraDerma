@@ -1,28 +1,18 @@
 # virtual env
-BTViz/.venv/
-BTViz/bin/
-
-# datastore
-BTViz/datastore/__pycache__/
-BTViz/datastore/dbs/
-BTViz/dbs
-dbs
-*dbs*
-*.db
-.idea
+.venv/
 
 # raw data
 raw_data/
 data/
 
-# python build
-BTViz/build/
-BTViz/dist/
-BTViz/app.spec
-
-# installer
-*.iss
-*.wxs
-
 # what is this?
 .DS_Store
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+*.ipynb_checkpoints
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
