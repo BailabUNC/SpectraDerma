@@ -16,3 +16,8 @@ data/
 __pycache__/
 *.py[cod]
 *$py.class
+
+# MATLAB cache
+*.asv
+
+figures/
