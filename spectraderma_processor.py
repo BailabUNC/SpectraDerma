@@ -11,6 +11,8 @@ class SpectraDermaProcessor:
         self.sample_rate = sample_rate
         self.channels = None
         self.timestamp = None
+        self._original_channels = None
+        self._original_timestamp = None
         
     def load_data(self, csv_path):
         """Load data from CSV file."""
@@ -18,6 +20,11 @@ class SpectraDermaProcessor:
         data = data.ffill()
         self.timestamp = data.index.to_series().to_numpy()
         self.channels = data.iloc[:, data.columns.str.startswith('data_')].to_numpy()
+        
+        # Store original data for reset functionality
+        self._original_timestamp = self.timestamp.copy()
+        self._original_channels = self.channels.copy()
+        
         return self
     
     def swt_denoise(self, wavelet="db2", level=3, zero_levels=(1, 2, 3)):
@@ -55,6 +62,35 @@ class SpectraDermaProcessor:
         self.channels = Y
         return self
     
+    def moving_average(self, window=30):
+        """Apply moving average filter."""
+        X = np.asarray(self.channels, float)
+        T, C = X.shape
+        Y = np.empty((T, C), dtype=float)
+        half_window = window // 2
+        for c in range(C):
+            xc = X[:, c]
+            yc = np.empty(T, dtype=float)
+            for t in range(T):
+                start = max(0, t - half_window)
+                end = min(T, t + half_window + 1)
+                yc[t] = np.mean(xc[start:end])
+            Y[:, c] = yc
+        self.channels = Y
+        return self
+
+    def lowpass_filter(self, cutoff=2.0, order=3):
+        """Apply lowpass filter."""
+        sos = butter(order, cutoff, 'lowpass', fs=self.sample_rate, output='sos')
+        self.channels = sosfiltfilt(sos, self.channels, axis=0)
+        return self
+
+    def highpass_filter(self, cutoff=0.5, order=3):
+        """Apply highpass filter."""
+        sos = butter(order, cutoff, 'highpass', fs=self.sample_rate, output='sos')
+        self.channels = sosfiltfilt(sos, self.channels, axis=0)
+        return self
+
     def bandpass_filter(self, low_freq=0.5, high_freq=2.0, order=3):
         """Apply bandpass filter."""
         sos = butter(order, (low_freq, high_freq), 'bandpass', fs=self.sample_rate, output='sos')
@@ -96,6 +132,15 @@ class SpectraDermaProcessor:
     def get_data(self):
         """Get processed data."""
         return self.timestamp, self.channels
+
+    def reset(self):
+        """Reset to original loaded data, undoing all processing steps."""
+        if self._original_channels is None or self._original_timestamp is None:
+            raise ValueError("No original data available. Please load data first using load_data().")
+        
+        self.channels = self._original_channels.copy()
+        self.timestamp = self._original_timestamp.copy()
+        return self
 
 
 # Example usage:
