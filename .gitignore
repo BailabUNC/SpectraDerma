@@ -1,6 +1,10 @@
 # virtual env
 .venv/
 
+# settings
+.vscode/
+.github/
+
 # raw data
 raw_data/
 data/
