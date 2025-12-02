@@ -129,26 +129,6 @@ The system processes various data types:
 - **Metadata**: Subject demographics and experimental conditions
 - **Power Data**: Device power consumption measurements
 
-## 🔍 Analysis Capabilities
-
-### Signal Processing
-- Bandpass filtering
-- Wavelet denoising
-- Peak detection
-- Heart rate variability analysis
-
-### Machine Learning
-- CNN-based signal classification
-- Feature extraction and selection
-- Model evaluation and validation
-- Cross-validation frameworks
-
-### Visualization
-- Interactive spectral plots
-- PPG signal visualization
-- Statistical analysis plots
-- Power consumption monitoring
-
 ## 📈 Key Notebooks
 
 1. **Training.ipynb**: GRU-based binary classifier for alcohol detection using 520S2 PPG segments
