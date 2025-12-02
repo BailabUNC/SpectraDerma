@@ -20,13 +20,17 @@ SpectraDerma is a research platform designed for analyzing PPG signals and spect
 ```
 SpectraDerma/
 ├── notebooks/                    # Jupyter notebooks for analysis
-│   ├── All_Data_Analysis.ipynb          # Comprehensive data analysis
-│   ├── Blood_Spectra_Visualization.ipynb # Blood spectra visualization
-│   ├── Data_Pipeline_Finger.ipynb       # Finger measurement pipeline
-│   ├── Data_Pipeline_Wrist.ipynb        # Wrist measurement pipeline
-│   ├── Training.ipynb                    # Model training notebook
-│   ├── Power_Consumption.ipynb           # Power analysis
-│   └── ...                              # Additional analysis notebooks
+│   ├── All_Data_Analysis.ipynb          # Basic data initialization and setup
+│   ├── Blood_Spectra_Visualization.ipynb # Blood alcohol spectra analysis and plotting
+│   ├── Data_Pipeline_Finger.ipynb       # Comprehensive finger PPG data processing
+│   ├── Data_Pipeline_Wrist.ipynb        # Wrist PPG measurement analysis pipeline
+│   ├── Training.ipynb                    # GRU-based PPG classifier training (520S2 dataset)
+│   ├── Power_Consumption.ipynb           # Device power consumption analysis
+│   ├── Metadata_Stat.ipynb              # Study design and participant statistics
+│   ├── Ecoflex_Comprehensive.ipynb      # Ecoflex material color normalization
+│   ├── Ecoflex.ipynb                    # Basic Ecoflex analysis
+│   ├── Sensor_Spectra_VS_Chromophore.ipynb # Sensor response vs chromophore comparison
+│   └── Short_Alcohol_Data.ipynb         # Abbreviated alcohol data visualization
 ├── data/                         # Data storage and processing
 │   ├── as7341/                          # AS7341 sensor data
 │   ├── blood_alcohol_spectra/           # Blood alcohol spectral data
@@ -94,14 +98,14 @@ processed_data = processor.process_signals()
 ### Model Training
 
 ```python
-from model import SpectraDermaPPGDataset, SpectraDermaCNN
+from model import SpectraDermaPPGDataset, SpectraDermaGRU
 
-# Load dataset
+# Load PPG dataset for binary classification
 dataset = SpectraDermaPPGDataset(segments_path, labels)
 
-# Initialize and train model
-model = SpectraDermaCNN()
-# Training code here...
+# Initialize GRU-based model for alcohol detection
+model = SpectraDermaGRU()
+# Training pipeline in Training.ipynb
 ```
 
 ### PPG Analysis
@@ -147,21 +151,24 @@ The system processes various data types:
 
 ## 📈 Key Notebooks
 
-1. **All_Data_Analysis.ipynb**: Comprehensive analysis of all collected data
-2. **Training.ipynb**: Model training and evaluation pipeline
-3. **Data_Pipeline_Finger.ipynb**: Finger measurement processing
-4. **Data_Pipeline_Wrist.ipynb**: Wrist measurement processing
-5. **Blood_Spectra_Visualization.ipynb**: Blood spectral data analysis
-6. **Power_Consumption.ipynb**: Device power analysis
+1. **Training.ipynb**: GRU-based binary classifier for alcohol detection using 520S2 PPG segments
+2. **Data_Pipeline_Finger.ipynb**: Complete finger PPG data processing and analysis workflow
+3. **Data_Pipeline_Wrist.ipynb**: Wrist measurement data processing and visualization pipeline  
+4. **Blood_Spectra_Visualization.ipynb**: Blood alcohol concentration spectral analysis and plotting
+5. **Metadata_Stat.ipynb**: Study participant demographics and experimental design statistics
+6. **Ecoflex_Comprehensive.ipynb**: Ecoflex material optical property normalization from photos
+7. **Power_Consumption.ipynb**: Device power usage monitoring and analysis
+8. **Sensor_Spectra_VS_Chromophore.ipynb**: Comparison of sensor spectral response with chromophore absorption
 
 ## 🔧 Model Architecture
 
-The system uses convolutional neural networks optimized for PPG signal processing:
+The system uses GRU-based neural networks optimized for PPG signal classification:
 
-- **Input**: Multi-channel PPG segments
-- **Architecture**: 1D CNN with attention mechanisms
-- **Output**: Binary classification or regression targets
-- **Optimization**: Adam optimizer with adaptive learning rates
+- **Input**: PPG segment sequences from 520S2 dataset
+- **Architecture**: GRU (Gated Recurrent Unit) with fully connected layers
+- **Output**: Binary classification (normal vs. alcohol conditions)
+- **Training**: Binary cross-entropy loss with Adam optimizer
+- **Application**: Alcohol detection from physiological signals
 
 ## 📄 Data Sources
 
@@ -185,7 +192,7 @@ This project is part of research conducted at the University of North Carolina a
 
 ## 👥 Authors
 
-- Research Team at Baila Lab, UNC Chapel Hill
+- Yihan Liu et al
 
 ## 📞 Contact
 
@@ -194,11 +201,12 @@ For questions or collaboration opportunities, please contact the research team.
 ## 🔬 Research Applications
 
 This system has been used for:
-- Photoplethysmography signal analysis
-- Blood alcohol detection research
-- Spectral dermatological measurements
-- Wearable device optimization
-- Physiological signal processing research
+- **Blood Alcohol Detection**: PPG-based classification of alcohol consumption states
+- **Spectral Analysis**: Blood alcohol and acetaldehyde concentration measurements
+- **Wearable PPG Monitoring**: Finger and wrist-based physiological signal acquisition
+- **Material Characterization**: Ecoflex optical property analysis for device design
+- **Power Optimization**: Device energy consumption monitoring and analysis
+- **Sensor Validation**: AS7341 spectral sensor response characterization
 
 ---
 
