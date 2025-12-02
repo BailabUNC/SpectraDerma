@@ -41,6 +41,7 @@
     },
     // `sidebar` and `panel` have the same config as `fullscreen`
     "background.sidebar": {},
-    "background.panel": {}
+    "background.panel": {},
+    "idf.currentSetup": "C:\\Users\\y1hli\\esp\\v5.2.2\\esp-idf"
 
 }
